@@ -9,6 +9,7 @@
 
 #include <ftk/Core/Image.h>
 #include <ftk/Core/Observable.h>
+#include <ftk/Core/ObservableList.h>
 
 #include <map>
 #include <utility>
@@ -100,6 +101,16 @@ namespace djv
             //! precedence over the configuration's file rules when the
             //! input color space is resolved.
             DJV_MODELS_API void setExtColorSpaces(const std::map<std::string, std::string>&);
+
+            //! Get the folders searched for Blender installations, besides
+            //! the usual places.
+            DJV_MODELS_API const std::vector<std::string>& getBlenderDirs() const;
+
+            //! Observe the folders searched for Blender installations.
+            DJV_MODELS_API std::shared_ptr<ftk::IObservableList<std::string> > observeBlenderDirs() const;
+
+            //! Set the folders searched for Blender installations.
+            DJV_MODELS_API void setBlenderDirs(const std::vector<std::string>&);
 
             //! Get the LUT options.
             DJV_MODELS_API const tl::LUTOptions& getLUTOptions() const;

@@ -3,6 +3,7 @@
 
 #include <djv/UI/ColorWidgets.h>
 
+#include <djv/Models/BlenderConfig.h>
 #include <djv/Models/ColorModel.h>
 #include <djv/Models/SettingsKeys.h>
 #include <djv/Models/ViewportModel.h>
@@ -61,7 +62,11 @@ namespace djv
             std::vector<std::string> colorSpaces;
             std::vector<std::string> exts;
 
+            std::vector<models::BlenderOCIOConfig> blenderConfigs;
+
             std::shared_ptr<ftk::CheckBox> enabledCheckBox;
+            std::shared_ptr<ftk::ComboBox> blenderComboBox;
+            std::shared_ptr<ftk::FileEdit> blenderDirEdit;
             std::shared_ptr<ftk::ComboBox> configComboBox;
             std::shared_ptr<ftk::FileEdit> fileEdit;
             std::shared_ptr<ftk::Label> nameLabel;
@@ -83,6 +88,7 @@ namespace djv
             std::shared_ptr<ftk::Observer<models::OCIOModelData> > dataObserver;
             std::shared_ptr<ftk::Observer<std::map<std::string, std::string> > > extObserver;
             std::shared_ptr<ftk::Observer<std::string> > resolvedObserver;
+            std::shared_ptr<ftk::ListObserver<std::string> > blenderDirsObserver;
         };
 
         void OCIOWidget::_init(
@@ -99,6 +105,20 @@ namespace djv
             p.enabledCheckBox = ftk::CheckBox::create(context);
             p.enabledCheckBox->setTooltip("Toggle whether OCIO is enabled.");
             ftk::setScreenshotTag(p.enabledCheckBox, "Color.OCIO.Enabled");
+
+            p.blenderComboBox = ftk::ComboBox::create(context);
+            p.blenderComboBox->setHStretch(ftk::Stretch::Expanding);
+            p.blenderComboBox->setTooltip(
+                "Use the color configuration of a Blender installation: the same "
+                "displays, views and looks as in Blender.");
+            ftk::setScreenshotTag(p.blenderComboBox, "Color.OCIO.Blender");
+
+            p.blenderDirEdit = ftk::FileEdit::create(context, ftk::FileBrowserMode::Dir);
+            p.blenderDirEdit->setTooltip(
+                "A folder with Blender in it: an installation, or a folder "
+                "holding several. Its configuration is found and used, and the "
+                "folder is remembered.");
+            ftk::setScreenshotTag(p.blenderDirEdit, "Color.OCIO.BlenderDir");
 
             p.configComboBox = ftk::ComboBox::create(context, tl::getOCIOConfigLabels());
             p.configComboBox->setHStretch(ftk::Stretch::Expanding);
@@ -185,6 +205,8 @@ namespace djv
             p.layout->setSpacingRole(ftk::SizeRole::SpacingSmall);
             p.formLayout = ftk::FormLayout::create(context, p.layout);
             p.formLayout->setSpacingRole(ftk::SizeRole::SpacingSmall);
+            p.formLayout->addRow("Blender:", p.blenderComboBox);
+            p.formLayout->addRow("Blender folder:", p.blenderDirEdit);
             p.formLayout->addRow("Configuration:", p.configComboBox);
             p.formLayout->addRow("File name:", p.fileEdit);
             p.formLayout->addRow("Name:", p.nameLabel);
@@ -227,6 +249,7 @@ namespace djv
                     p.configComboBox->setCurrentIndex(static_cast<int>(value.config));
                     p.fileEdit->setPath(ftk::Path(value.fileName));
                     p.nameLabel->setText(value.name);
+                    _blenderCurrentUpdate();
                     p.formLayout->setRowVisible(p.fileEdit, tl::OCIOConfig::File == value.config);
                     p.inputComboBox->setItems(value.inputs);
                     p.inputComboBox->setCurrentIndex(value.inputIndex);
@@ -255,6 +278,44 @@ namespace djv
                 [this](bool value)
                 {
                     _p->ocioModel->setEnabled(value);
+                });
+
+            p.blenderComboBox->setIndexCallback(
+                [this](int index)
+                {
+                    FTK_P();
+                    if (index > 0 && index - 1 < static_cast<int>(p.blenderConfigs.size()))
+                    {
+                        p.ocioModel->setBlenderConfig(p.blenderConfigs[index - 1].configPath);
+                    }
+                });
+
+            p.blenderDirEdit->setCallback(
+                [this](const ftk::Path& value)
+                {
+                    FTK_P();
+                    const std::string dir = value.get();
+                    const auto found = models::findBlenderOCIOConfigs(dir);
+                    if (found.empty())
+                    {
+                        if (auto context = getContext())
+                        {
+                            context->log(
+                                "djv::ui::OCIOWidget",
+                                ftk::Format("No Blender color configuration found in \"{0}\".").
+                                    arg(dir),
+                                ftk::LogType::Warning);
+                        }
+                        return;
+                    }
+                    auto dirs = p.colorModel->getBlenderDirs();
+                    if (std::find(dirs.begin(), dirs.end(), dir) == dirs.end())
+                    {
+                        dirs.push_back(dir);
+                        p.colorModel->setBlenderDirs(dirs);
+                    }
+                    // The newest of what the folder holds.
+                    p.ocioModel->setBlenderConfig(found.front().configPath);
                 });
 
             p.configComboBox->setIndexCallback(
@@ -316,6 +377,24 @@ namespace djv
                     p.formLayout->setRowVisible(p.resolvedLabel, !value.empty());
                 });
 
+            p.blenderDirsObserver = ftk::ListObserver<std::string>::create(
+                colorModel->observeBlenderDirs(),
+                [this](const std::vector<std::string>& value)
+                {
+                    FTK_P();
+                    p.blenderConfigs = models::findInstalledBlenderOCIOConfigs(value);
+                    std::vector<std::string> items;
+                    items.push_back(p.blenderConfigs.empty() ?
+                        "(No Blender found, choose its folder below)" :
+                        "(Choose a Blender version)");
+                    for (const auto& i : p.blenderConfigs)
+                    {
+                        items.push_back(i.label);
+                    }
+                    p.blenderComboBox->setItems(items);
+                    _blenderCurrentUpdate();
+                });
+
             p.extObserver = ftk::Observer<std::map<std::string, std::string> >::create(
                 colorModel->observeExtColorSpaces(),
                 [this](const std::map<std::string, std::string>& value)
@@ -345,6 +424,27 @@ namespace djv
         std::shared_ptr<ftk::CheckBox> OCIOWidget::getEnabledCheckBox() const
         {
             return _p->enabledCheckBox;
+        }
+
+        void OCIOWidget::_blenderCurrentUpdate()
+        {
+            FTK_P();
+            // The Blender whose configuration is in use, when it is one.
+            int index = 0;
+            const tl::OCIOOptions& options = p.colorModel->getOCIOOptions();
+            if (tl::OCIOConfig::File == options.config)
+            {
+                const std::string fileName = ftk::toLower(options.fileName);
+                for (size_t i = 0; i < p.blenderConfigs.size(); ++i)
+                {
+                    if (ftk::toLower(p.blenderConfigs[i].configPath) == fileName)
+                    {
+                        index = static_cast<int>(i) + 1;
+                        break;
+                    }
+                }
+            }
+            p.blenderComboBox->setCurrentIndex(index);
         }
 
         void OCIOWidget::_extUpdate()

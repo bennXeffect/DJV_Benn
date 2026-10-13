@@ -3,9 +3,13 @@
 
 #include <djv/Models/OCIOModel.h>
 
+#include <djv/Models/BlenderConfig.h>
+
 #include <ftk/Core/Context.h>
 #include <ftk/Core/OS.h>
 #include <ftk/Core/Path.h>
+
+#include <set>
 
 #if defined(TLRENDER_OCIO)
 #include <OpenColorIO/OpenColorIO.h>
@@ -140,6 +144,39 @@ namespace djv
             p.data->setIfChanged(_getData(options));
         }
 
+        void OCIOModel::setBlenderConfig(const std::string& fileName)
+        {
+            FTK_P();
+            tl::OCIOOptions options = p.options->get();
+            options.enabled = true;
+            options.config = tl::OCIOConfig::File;
+            options.fileName = fileName;
+            options.display = std::string();
+            options.view = std::string();
+            options.look = std::string();
+            _configUpdate(options);
+#if defined(TLRENDER_OCIO)
+            if (p.ocioConfig)
+            {
+                const char* display = p.ocioConfig->getDefaultDisplay();
+                options.display = display ? display : std::string();
+                const char* view = p.ocioConfig->getDefaultView(options.display.c_str());
+                options.view = view ? view : std::string();
+                const std::string blenderView = getBlenderDefaultView();
+                for (int i = 0; i < p.ocioConfig->getNumViews(options.display.c_str()); ++i)
+                {
+                    if (blenderView == p.ocioConfig->getView(options.display.c_str(), i))
+                    {
+                        options.view = blenderView;
+                        break;
+                    }
+                }
+            }
+#endif // TLRENDER_OCIO
+            p.options->setIfChanged(options);
+            p.data->setIfChanged(_getData(options));
+        }
+
         std::shared_ptr<ftk::IObservable<OCIOModelData> > OCIOModel::observeData() const
         {
             return _p->data;
@@ -252,6 +289,15 @@ namespace djv
                     if ("config.ocio" == out.name)
                     {
                         out.name = ftk::fromFileSystem(path.parent_path().filename());
+                        // Blender's, in "<version>/datafiles/colormanagement",
+                        // which says nothing on its own.
+                        const auto found = findBlenderOCIOConfigs(options.fileName);
+                        if ("colormanagement" == out.name &&
+                            !found.empty() &&
+                            !found.front().version.empty())
+                        {
+                            out.name = found.front().label;
+                        }
                     }
                 }
                 // Not "None": an empty input means the color space is
@@ -293,11 +339,44 @@ namespace djv
                     out.viewIndex = j - out.views.begin();
                 }
 
-                out.looks.push_back("None");
+                // Looks filtered by the view the way Blender does: a look
+                // named "<view> - <name>" belongs to that view, and a view
+                // with looks of its own shows only those ("AgX - Punchy"
+                // under AgX). A view without any shows the looks that belong
+                // to no view, and a configuration whose looks name no view
+                // shows all of them, as before.
+                std::set<std::string> viewNames;
+                for (int i = 0; i < p.ocioConfig->getNumDisplays(); ++i)
+                {
+                    const char* d = p.ocioConfig->getDisplay(i);
+                    for (int k = 0; k < p.ocioConfig->getNumViews(d); ++k)
+                    {
+                        viewNames.insert(p.ocioConfig->getView(d, k));
+                    }
+                }
+                std::vector<std::string> viewLooks;
+                std::vector<std::string> generalLooks;
                 for (int i = 0; i < p.ocioConfig->getNumLooks(); ++i)
                 {
-                    out.looks.push_back(p.ocioConfig->getLookNameByIndex(i));
+                    const std::string look = p.ocioConfig->getLookNameByIndex(i);
+                    const size_t pos = look.find(" - ");
+                    const std::string prefix =
+                        pos != std::string::npos ? look.substr(0, pos) : std::string();
+                    if (!prefix.empty() && viewNames.count(prefix) > 0)
+                    {
+                        if (prefix == options.view)
+                        {
+                            viewLooks.push_back(look);
+                        }
+                    }
+                    else
+                    {
+                        generalLooks.push_back(look);
+                    }
                 }
+                out.looks.push_back("None");
+                const auto& looks = !viewLooks.empty() ? viewLooks : generalLooks;
+                out.looks.insert(out.looks.end(), looks.begin(), looks.end());
                 j = std::find(out.looks.begin(), out.looks.end(), options.look);
                 if (j != out.looks.end())
                 {

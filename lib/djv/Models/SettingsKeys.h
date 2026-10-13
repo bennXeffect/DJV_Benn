@@ -50,6 +50,7 @@ namespace djv
             //! The models' own values.
             constexpr const char* audioVolume = "/Audio/Volume";
             constexpr const char* audioMute = "/Audio/Mute";
+            constexpr const char* colorBlenderDirs = "/Color/BlenderDirs";
             constexpr const char* colorOCIO = "/Color/OCIO";
             constexpr const char* colorOCIOExtColorSpaces = "/Color/OCIOExtColorSpaces";
             constexpr const char* colorLUT = "/Color/LUT";

@@ -75,6 +75,11 @@ namespace djv
             //! Set the color configuration file.
             DJV_MODELS_API void setFileName(const std::string& fileName);
 
+            //! Use a configuration file the way Blender does: the file is
+            //! loaded with Blender's default view ("AgX") where its default
+            //! display has one, and no look.
+            DJV_MODELS_API void setBlenderConfig(const std::string& fileName);
+
             //! Set the input index.
             DJV_MODELS_API void setInputIndex(size_t);
 

@@ -2,6 +2,7 @@ set(HEADERS
     AnnotationsModel.h
     AppInfoModel.h
     AudioModel.h
+    BlenderConfig.h
     ColorModel.h
     CommandsModel.h
     DrawModel.h
@@ -28,6 +29,7 @@ set(SOURCE
     AnnotationsModel.cpp
     AppInfoModel.cpp
     AudioModel.cpp
+    BlenderConfig.cpp
     ColorModel.cpp
     CommandsModel.cpp
     DrawModel.cpp

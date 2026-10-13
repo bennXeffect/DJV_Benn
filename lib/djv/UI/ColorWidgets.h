@@ -49,6 +49,7 @@ namespace djv
             DJV_UI_API std::shared_ptr<ftk::CheckBox> getEnabledCheckBox() const;
 
         private:
+            void _blenderCurrentUpdate();
             void _extUpdate();
 
             FTK_PRIVATE();

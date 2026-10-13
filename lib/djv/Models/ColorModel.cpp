@@ -103,6 +103,7 @@ namespace djv
             std::shared_ptr<ftk::Observable<std::string> > resolvedInput;
             std::shared_ptr<ftk::Observable<tl::LUTOptions> > lutOptions;
             std::shared_ptr<ftk::Observable<std::map<std::string, std::string> > > extColorSpaces;
+            std::shared_ptr<ftk::ObservableList<std::string> > blenderDirs;
             std::vector<std::pair<std::string, ftk::ImageTags> > activeFiles;
             std::shared_ptr<ftk::Observable<std::vector<std::string> > > resolvedInputs;
             // Set beside the resolved options: the input color space and
@@ -143,6 +144,10 @@ namespace djv
             std::map<std::string, std::string> extColorSpaces;
             p.settings->getT(settingsKeys::colorOCIOExtColorSpaces, extColorSpaces);
             p.extColorSpaces = ftk::Observable<std::map<std::string, std::string> >::create(extColorSpaces);
+
+            std::vector<std::string> blenderDirs;
+            p.settings->get(settingsKeys::colorBlenderDirs, blenderDirs);
+            p.blenderDirs = ftk::ObservableList<std::string>::create(blenderDirs);
             p.resolvedOCIOOptions = ftk::Observable<tl::OCIOOptions>::create(
                 _resolvedOCIOOptions());
             p.resolvedInput = ftk::Observable<std::string>::create(
@@ -189,6 +194,7 @@ namespace djv
             FTK_P();
             p.settings->setT(settingsKeys::colorOCIO, p.ocioOptions->get());
             p.settings->setT(settingsKeys::colorOCIOExtColorSpaces, p.extColorSpaces->get());
+            p.settings->set(settingsKeys::colorBlenderDirs, p.blenderDirs->get());
             p.settings->setT(settingsKeys::colorLUT, p.lutOptions->get());
         }
 
@@ -280,6 +286,21 @@ namespace djv
             {
                 _resolvedUpdate();
             }
+        }
+
+        const std::vector<std::string>& ColorModel::getBlenderDirs() const
+        {
+            return _p->blenderDirs->get();
+        }
+
+        std::shared_ptr<ftk::IObservableList<std::string> > ColorModel::observeBlenderDirs() const
+        {
+            return _p->blenderDirs;
+        }
+
+        void ColorModel::setBlenderDirs(const std::vector<std::string>& value)
+        {
+            _p->blenderDirs->setIfChanged(value);
         }
 
         const tl::LUTOptions& ColorModel::getLUTOptions() const
