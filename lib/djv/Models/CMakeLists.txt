@@ -8,6 +8,7 @@ set(HEADERS
     DrawModel.h
     Export.h
     FilesModel.h
+    LayerStack.h
     MarkersModel.h
     OCIOModel.h
     Parse.h
@@ -34,6 +35,7 @@ set(SOURCE
     CommandsModel.cpp
     DrawModel.cpp
     FilesModel.cpp
+    LayerStack.cpp
     MarkersModel.cpp
     OCIOModel.cpp
     Parse.cpp

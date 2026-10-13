@@ -2,6 +2,8 @@
 // Copyright Contributors to the DJV project.
 
 #include <djv/Models/ColorModel.h>
+
+#include <djv/Models/LayerStack.h>
 #include <djv/Models/SettingsKeys.h>
 
 #include <ftk/UI/Settings.h>
@@ -104,6 +106,7 @@ namespace djv
             std::shared_ptr<ftk::Observable<tl::LUTOptions> > lutOptions;
             std::shared_ptr<ftk::Observable<std::map<std::string, std::string> > > extColorSpaces;
             std::shared_ptr<ftk::ObservableList<std::string> > blenderDirs;
+            std::map<std::string, std::string> layerColorSpaces;
             std::vector<std::pair<std::string, ftk::ImageTags> > activeFiles;
             std::shared_ptr<ftk::Observable<std::vector<std::string> > > resolvedInputs;
             // Set beside the resolved options: the input color space and
@@ -288,6 +291,99 @@ namespace djv
             }
         }
 
+        void ColorModel::setLayerColorSpaces(const std::map<std::string, std::string>& value)
+        {
+            FTK_P();
+            if (value == p.layerColorSpaces)
+                return;
+            p.layerColorSpaces = value;
+            _resolvedUpdate();
+        }
+
+        std::vector<std::string> ColorModel::getColorSpaceNames() const
+        {
+            FTK_P();
+            std::vector<std::string> out;
+#if defined(TLRENDER_OCIO)
+            if (p.ocioConfig)
+            {
+                for (int i = 0; i < p.ocioConfig->getNumColorSpaces(); ++i)
+                {
+                    out.push_back(p.ocioConfig->getColorSpaceNameByIndex(i));
+                }
+            }
+#endif // TLRENDER_OCIO
+            return out;
+        }
+
+        std::string ColorModel::getViewInverseColorSpace() const
+        {
+            FTK_P();
+            std::string out;
+#if defined(TLRENDER_OCIO)
+            if (p.ocioConfig)
+            {
+                try
+                {
+                    const tl::OCIOOptions& options = p.ocioOptions->get();
+                    std::string display = options.display;
+                    if (display.empty())
+                    {
+                        display = p.ocioConfig->getDefaultDisplay();
+                    }
+                    std::string view = options.view;
+                    if (view.empty())
+                    {
+                        view = p.ocioConfig->getDefaultView(display.c_str());
+                    }
+                    const std::string displayColorSpace =
+                        p.ocioConfig->getDisplayViewColorSpaceName(
+                            display.c_str(), view.c_str());
+                    // A configuration with view inverses, as Blender's has,
+                    // names them after the view and the display: "AgX Base
+                    // sRGB", "ACES 2.0 sRGB". Matched on the view's own name
+                    // and the display's, in the "View Inverse" family.
+                    const std::string viewLower = ftk::toLower(view);
+                    const std::string displayLower = ftk::toLower(display);
+                    const std::string displayCSLower = ftk::toLower(displayColorSpace);
+                    for (int i = 0; i < p.ocioConfig->getNumColorSpaces() && out.empty(); ++i)
+                    {
+                        const char* name = p.ocioConfig->getColorSpaceNameByIndex(i);
+                        const auto colorSpace = p.ocioConfig->getColorSpace(name);
+                        if (!colorSpace)
+                            continue;
+                        const std::string family = ftk::toLower(colorSpace->getFamily());
+                        const std::string nameLower = ftk::toLower(name);
+                        if (family.find("view inverse") != std::string::npos &&
+                            nameLower.find(viewLower) != std::string::npos &&
+                            (nameLower.find(displayLower) != std::string::npos ||
+                             (!displayCSLower.empty() &&
+                              nameLower.find(displayCSLower) != std::string::npos)))
+                        {
+                            out = name;
+                        }
+                    }
+                    // A view with no transform of its own, Blender's
+                    // "Standard", is just the display's encoding, and so is
+                    // its inverse.
+                    if (out.empty() && !displayColorSpace.empty())
+                    {
+                        const char* vt = p.ocioConfig->getDisplayViewTransformName(
+                            display.c_str(), view.c_str());
+                        if (!vt || !vt[0] || ftk::toLower(vt) == "standard" ||
+                            viewLower == "standard" || viewLower == "raw")
+                        {
+                            out = displayColorSpace;
+                        }
+                    }
+                }
+                catch (const std::exception&)
+                {}
+            }
+#endif // TLRENDER_OCIO
+            return out;
+        }
+
         const std::vector<std::string>& ColorModel::getBlenderDirs() const
         {
             return _p->blenderDirs->get();
@@ -431,13 +527,27 @@ namespace djv
                 return out;
             }
 
+            // A layer of a layer stack says what it is in the Layers tool,
+            // which is the most deliberate of all.
+            const auto layer = p.layerColorSpaces.find(getMediaKey(path));
             // The user's own extension assignments come before what the
             // file says and before the configuration's rules: they are set
             // from inside DJV, so they are the most deliberate of the
             // three.
             const auto& extColorSpaces = p.extColorSpaces->get();
             const auto i = extColorSpaces.find(ext);
-            if (i != extColorSpaces.end() && !i->second.empty())
+            const std::string layerColorSpace =
+                layer == p.layerColorSpaces.end() ? std::string() :
+                layer->second == getLayerViewInverseToken() ? getViewInverseColorSpace() :
+                layer->second;
+            if (!layerColorSpace.empty())
+            {
+                out = layerColorSpace;
+                source = layer->second == getLayerViewInverseToken() ?
+                    "layer, view inverse" :
+                    "layer";
+            }
+            else if (i != extColorSpaces.end() && !i->second.empty())
             {
                 out = i->second;
                 source = "extension";
@@ -496,6 +606,28 @@ namespace djv
                 }
                 catch (const std::exception&)
                 {}
+                // A configuration with no rules and no default role, as
+                // Blender's is, answers as Blender does: byte images in its
+                // default_byte role, float ones in default_float.
+                if (out.empty())
+                {
+                    try
+                    {
+                        const bool isFloat =
+                            ".exr" == ext || ".hdr" == ext || ".pfm" == ext || ".sxr" == ext;
+                        const char* role = isFloat ? "default_float" : "default_byte";
+                        if (p.ocioConfig->hasRole(role))
+                        {
+                            if (const auto colorSpace = p.ocioConfig->getColorSpace(role))
+                            {
+                                out = colorSpace->getName();
+                                source = std::string("role ") + role;
+                            }
+                        }
+                    }
+                    catch (const std::exception&)
+                    {}
+                }
                 }
             }
             if (label && !out.empty())

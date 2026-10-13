@@ -102,6 +102,21 @@ namespace djv
             //! input color space is resolved.
             DJV_MODELS_API void setExtColorSpaces(const std::map<std::string, std::string>&);
 
+            //! Set the input color spaces of the layers of a layer stack, by
+            //! media key (see getMediaKey()). These come before everything
+            //! else when a path is resolved. A value can be the view inverse
+            //! token (see getLayerViewInverseToken()).
+            DJV_MODELS_API void setLayerColorSpaces(const std::map<std::string, std::string>&);
+
+            //! Get the names of the color spaces of the current
+            //! configuration.
+            DJV_MODELS_API std::vector<std::string> getColorSpaceNames() const;
+
+            //! Get the color space a layer's view inverse resolves to with
+            //! the current configuration, display and view; empty when there
+            //! is none.
+            DJV_MODELS_API std::string getViewInverseColorSpace() const;
+
             //! Get the folders searched for Blender installations, besides
             //! the usual places.
             DJV_MODELS_API const std::vector<std::string>& getBlenderDirs() const;

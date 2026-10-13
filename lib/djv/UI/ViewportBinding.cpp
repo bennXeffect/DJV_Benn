@@ -116,7 +116,21 @@ namespace djv
                 viewportModel->observeAlphaBlendAuto(),
                 [this](bool value)
                 {
-                    _p->alphaBlendAuto = value;
+                    FTK_P();
+                    p.alphaBlendAuto = value;
+                    // The layers of a timeline each blend the way their own
+                    // file is written, so a stack of an OpenEXR over a JPG
+                    // blends the OpenEXR premultiplied.
+                    if (auto viewport = p.viewport.lock())
+                    {
+                        viewport->setAlphaBlendResolver(value ?
+                            std::function<std::optional<ftk::AlphaBlend>(const std::string&)>(
+                                [](const std::string& path) -> std::optional<ftk::AlphaBlend>
+                                {
+                                    return models::getFileAlphaBlend(ftk::Path(path));
+                                }) :
+                            nullptr);
+                    }
                     _videoUpdate();
                 });
 

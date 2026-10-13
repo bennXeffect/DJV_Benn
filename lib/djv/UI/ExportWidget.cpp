@@ -930,6 +930,14 @@ namespace djv
                                     std::string();
                             });
                     }
+                    if (p.viewportModel.lock()->getAlphaBlendAuto())
+                    {
+                        p.exportData->render->setAlphaBlendResolver(
+                            [](const std::string& path) -> std::optional<ftk::AlphaBlend>
+                            {
+                                return models::getFileAlphaBlend(ftk::Path(path));
+                            });
+                    }
                     ftk::gl::OffscreenBufferOptions offscreenBufferOptions;
                     // The wipe comparison masks with the stencil buffer, so
                     // the buffer needs one. Paired with depth, as the

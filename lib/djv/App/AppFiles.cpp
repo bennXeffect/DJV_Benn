@@ -31,12 +31,14 @@
 
 #include <ctime>
 #include <ftk/Core/Path.h>
+#include <ftk/Core/String.h>
 
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <optional>
+#include <set>
 
 #if defined(__GLIBC__)
 #include <malloc.h>
@@ -335,8 +337,25 @@ namespace djv
             FTK_P();
             std::vector<std::shared_ptr<models::FilesModelItem> > items;
             std::optional<ftk::RangeI64> itemFrames = frames;
+            // Selecting every frame of a sequence, as one does in Blender's
+            // file browser, names the same sequence once per frame. Each one
+            // would be gathered into the whole sequence and opened again --
+            // thousands of copies, and a scan of the directory for each. The
+            // first frame named stands for its sequence and the rest are
+            // dropped before anything is read.
+            std::set<std::string> seqKeys;
             for (const auto& path : paths)
             {
+                if (gatherSeq && path.hasNum() && paths.size() > 1)
+                {
+                    const std::string key = ftk::toLower(
+                        path.getProtocol() + path.getDir() + path.getBase() +
+                        "#" + path.getExt());
+                    if (!seqKeys.insert(key).second)
+                    {
+                        continue;
+                    }
+                }
                 const auto i = _openItems(path, audioPath, itemFrames, gatherSeq);
                 // The range describes one sequence, so it belongs to the
                 // first file named rather than to each of them.
@@ -1108,6 +1127,9 @@ namespace djv
             }
 
             p.activeFiles = activeFiles;
+            // The layer stack being shown, and its layers' color spaces,
+            // before the player is: the first frame is drawn with them.
+            _layerStackUpdate();
             // Before the old one goes: dropped frames are counted by the
             // player, and a session that switched files would otherwise end
             // reporting only the last one's.

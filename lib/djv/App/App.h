@@ -5,6 +5,7 @@
 
 #include <djv/App/Export.h>
 #include <djv/Models/Export.h>
+#include <djv/Models/LayerStack.h>
 #include <djv/Models/SettingsModel.h>
 
 #include <tlRender/Timeline/Player.h>
@@ -278,6 +279,33 @@ namespace djv
             //! Reload the active files.
             DJV_APP_API void reload();
 
+            //! \name Layers
+            ///@{
+
+            //! Observe the layer stack being shown, when the current file is
+            //! one.
+            DJV_APP_API std::shared_ptr<ftk::IObservable<std::optional<models::LayerStack> > > observeLayerStack() const;
+
+            //! Stack the open files as layers, in a new layer stack that is
+            //! opened as a file of its own.
+            DJV_APP_API void newLayerStack();
+
+            //! Add files as layers on top of the current layer stack, or in a
+            //! new one when the current file is not a stack.
+            DJV_APP_API void addLayers(const std::vector<ftk::Path>&);
+
+            //! Choose files to add as layers.
+            DJV_APP_API void addLayersDialog();
+
+            //! Save the current layer stack somewhere else, to keep it or
+            //! give it to someone; the copy is opened in its place.
+            DJV_APP_API void saveLayerStackDialog();
+
+            //! Change the current layer stack: it is written and reloaded.
+            DJV_APP_API void setLayerStack(const models::LayerStack&);
+
+            ///@}
+
             //! Observe the timeline player.
             DJV_APP_API std::shared_ptr<ftk::IObservable<std::shared_ptr<tl::Player> > > observePlayer() const;
 
@@ -343,6 +371,12 @@ namespace djv
             void _closeFailed();
             void _filesUpdate(const std::vector<std::shared_ptr<models::FilesModelItem> >&);
             void _activeUpdate(const std::vector<std::shared_ptr<models::FilesModelItem> >&);
+            std::filesystem::path _layerStacksDir() const;
+            std::optional<models::Layer> _makeLayer(
+                const ftk::Path&,
+                const std::optional<OTIO_NS::TimeRange>&);
+            void _openLayerStack(models::LayerStack);
+            void _layerStackUpdate();
             // The timeline for a file in the list, opened the first time
             // it is asked for: only the current file and the files compared
             // with it need one.

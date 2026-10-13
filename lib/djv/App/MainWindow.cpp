@@ -172,6 +172,8 @@ namespace djv
             std::shared_ptr<ftk::Observer<std::pair<std::string, std::string> > > showSectionObserver;
             std::shared_ptr<ftk::Observer<models::MouseSettings> > mouseSettingsObserver;
             std::shared_ptr<ftk::Observer<models::TimelineSettings> > timelineSettingsObserver;
+            std::shared_ptr<ftk::Observer<std::optional<models::LayerStack> > > layerStackObserver;
+            bool layerStack = false;
             std::shared_ptr<ftk::Observer<bool> > timelineFrameViewObserver;
 
             //! The player the timeline shows, and the preview of it that
@@ -592,6 +594,22 @@ namespace djv
                 [this](const models::MouseSettings& value)
                 {
                     _settingsUpdate(value);
+                });
+
+            p.layerStackObserver = ftk::Observer<std::optional<models::LayerStack> >::create(
+                app->observeLayerStack(),
+                [this, appWeak = std::weak_ptr<App>(app)](const std::optional<models::LayerStack>& value)
+                {
+                    FTK_P();
+                    const bool layerStack = value.has_value();
+                    if (layerStack != p.layerStack)
+                    {
+                        p.layerStack = layerStack;
+                        if (auto app = appWeak.lock())
+                        {
+                            _settingsUpdate(app->getSettingsModel()->getTimeline());
+                        }
+                    }
                 });
 
             p.timelineSettingsObserver = ftk::Observer<models::TimelineSettings>::create(
@@ -1113,7 +1131,9 @@ namespace djv
 
             // With nothing open the timeline is hidden, so it takes the
             // minimized layout to drop the splitter.
-            const bool minimize = settings.minimize || !p.player;
+            // A layer stack shows every layer, a track each, as an editor
+            // does, whatever the setting.
+            const bool minimize = (settings.minimize && !p.layerStack) || !p.player;
 
             auto display = p.timelineWidget->getDisplayOptions();
 

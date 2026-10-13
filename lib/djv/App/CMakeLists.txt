@@ -28,6 +28,7 @@ set(HEADERS
     InfoTool.h
     MagnifyTool.h
     ScopesTool.h
+    LayersTool.h
     MainWindow.h
     MessagesTool.h
     PlaybackActions.h
@@ -61,6 +62,7 @@ set(HEADERS_PRIVATE
 set(SOURCE
     App.cpp
     AppFiles.cpp
+    AppLayers.cpp
     AppModels.cpp
     AppReview.cpp
     AudioActions.cpp
@@ -92,6 +94,7 @@ set(SOURCE
     MainWindow.cpp
     MagnifyTool.cpp
     ScopesTool.cpp
+    LayersTool.cpp
     MessagesTool.cpp
     PlaybackActions.cpp
     PlaybackMenu.cpp
