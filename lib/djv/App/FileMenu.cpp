@@ -4,6 +4,7 @@
 #include <djv/App/FileMenu.h>
 
 #include <djv/App/App.h>
+#include <djv/Models/FilesModel.h>
 #include <djv/App/FileActions.h>
 #include <djv/Models/RecentFilesModel.h>
 
@@ -167,7 +168,7 @@ namespace djv
             for (size_t i = 0; i < value.size(); ++i)
             {
                 auto action = ftk::Action::create(
-                    value[i]->path.getFileName(),
+                    models::getDisplayName(value[i]->path),
                     [this, i]
                     {
                         close();

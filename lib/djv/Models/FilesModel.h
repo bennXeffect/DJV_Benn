@@ -298,6 +298,11 @@ namespace djv
         //! itself otherwise.
         DJV_MODELS_API std::string getMediaReferenceLabel(const std::string&);
 
+        //! Get the name a file is shown by. A sequence is named by its
+        //! range, "render.[0986-3590].exr", rather than by its first frame,
+        //! which read as the frame being looked at.
+        DJV_MODELS_API std::string getDisplayName(const ftk::Path&);
+
         //! Find the media reference key a file uses by the key itself or the
         //! name it is shown with; "" or "As Authored" is the empty key.
         //! Nothing when the file does not use it.

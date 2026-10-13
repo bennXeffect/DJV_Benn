@@ -559,7 +559,7 @@ namespace djv
             }
             else if (auto a = p.filesModel->getA())
             {
-                title = a->path.getFileName() + " - " + title;
+                title = models::getDisplayName(a->path) + " - " + title;
             }
             p.mainWindow->setTitle(title);
         }

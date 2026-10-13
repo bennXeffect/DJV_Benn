@@ -4,6 +4,7 @@
 #include <djv/App/StatusBar.h>
 
 #include <djv/App/App.h>
+#include <djv/Models/FilesModel.h>
 #include <djv/App/SystemMemory.h>
 #include <djv/Models/SettingsModel.h>
 #include <djv/Models/ToolsModel.h>
@@ -330,7 +331,7 @@ namespace djv
                 "Display information about the current file.";
 
             std::vector<std::string> s;
-            s.push_back(ftk::elide(path.getFileName()));
+            s.push_back(ftk::elide(models::getDisplayName(path)));
             if (!info.video.empty())
             {
                 s.push_back(std::string(

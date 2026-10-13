@@ -551,7 +551,7 @@ namespace djv
                         // start, the version, frame, and extension at the end.
                         auto nameLabel = ftk::Label::create(
                             context,
-                            item->path.getFileName(),
+                            models::getDisplayName(item->path),
                             rowLayout);
                         nameLabel->setElide(true, ftk::ElideMode::Middle);
                         nameLabel->setHStretch(ftk::Stretch::Expanding);

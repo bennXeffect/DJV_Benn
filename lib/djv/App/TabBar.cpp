@@ -61,7 +61,7 @@ namespace djv
                     for (const auto& item : value)
                     {
                         p.tabBar->addTab(
-                            item->path.getFileName(),
+                            models::getDisplayName(item->path),
                             item->path.get());
                     }
                     p.tabBar->setCurrent(p.aIndex);

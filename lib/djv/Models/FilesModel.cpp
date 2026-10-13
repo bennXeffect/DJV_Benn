@@ -901,6 +901,16 @@ namespace djv
             return out;
         }
 
+        std::string getDisplayName(const ftk::Path& path)
+        {
+            if (path.isSeq() && path.getFrames().has_value() &&
+                path.getFrames()->min() != path.getFrames()->max())
+            {
+                return path.getBase() + "[" + path.getFrameRange() + "]" + path.getExt();
+            }
+            return path.getFileName();
+        }
+
         std::string getMediaReferenceLabel(const std::string& key)
         {
             std::string out = key;
