@@ -37,6 +37,7 @@ set(HEADERS
     SecondaryWindow.h
     SettingsTool.h
     StatusBar.h
+    SystemMemory.h
     SysLogTool.h
     TabBar.h
     TimelineActions.h
@@ -99,6 +100,7 @@ set(SOURCE
     SettingsTool.cpp
     ShellAssociations.cpp
     StatusBar.cpp
+    SystemMemory.cpp
     SysLogTool.cpp
     TabBar.cpp
     TimelineActions.cpp
@@ -125,6 +127,10 @@ else()
     target_compile_definitions(djvApp PUBLIC DJV_APP_STATIC)
 endif()
 target_link_libraries(djvApp djvUI)
+if(WIN32)
+    # The memory in the status bar: process memory and the video memory.
+    target_link_libraries(djvApp psapi dxgi)
+endif()
 set_target_properties(djvApp PROPERTIES FOLDER lib)
 set_target_properties(djvApp PROPERTIES PUBLIC_HEADER "${HEADERS}")
 

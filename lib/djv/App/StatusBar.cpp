@@ -4,6 +4,7 @@
 #include <djv/App/StatusBar.h>
 
 #include <djv/App/App.h>
+#include <djv/App/SystemMemory.h>
 #include <djv/Models/SettingsModel.h>
 #include <djv/Models/ToolsModel.h>
 
@@ -26,6 +27,7 @@ namespace djv
 
             std::shared_ptr<ftk::Label> messagesLabel;
             std::shared_ptr<ftk::Label> infoLabel;
+            std::shared_ptr<ftk::Label> memoryLabel;
             std::string message;
             std::string hint;
             std::shared_ptr<ftk::HorizontalLayout> layout;
@@ -33,6 +35,7 @@ namespace djv
             int cornerRadius = 0;
 
             std::shared_ptr<ftk::Timer> messagesTimer;
+            std::shared_ptr<ftk::Timer> memoryTimer;
 
             std::shared_ptr<tl::Player> player;
 
@@ -72,12 +75,32 @@ namespace djv
             p.infoLabel->setMarginRole(ftk::SizeRole::MarginSmall, ftk::SizeRole::MarginInside);
             p.infoLabel->setClipText(true);
 
+            // Memory in use, as Blender's status bar has it: what this
+            // process holds, the system's use of its total, and the video
+            // memory.
+            p.memoryLabel = ftk::Label::create(context);
+            p.memoryLabel->setMarginRole(ftk::SizeRole::MarginSmall, ftk::SizeRole::MarginInside);
+            p.memoryLabel->setTooltip(
+                "RAM: the memory DJV uses (the system's use of its total).\n"
+                "VRAM: the video memory DJV uses, of the graphics card's total.");
+
             p.layout = ftk::HorizontalLayout::create(context, shared_from_this());
             p.layout->setSpacingRole(ftk::SizeRole::SpacingTool);
             p.messagesLabel->setParent(p.layout);
             p.infoLabel->setParent(p.layout);
+            p.memoryLabel->setParent(p.layout);
 
             p.messagesTimer = ftk::Timer::create(context);
+
+            p.memoryTimer = ftk::Timer::create(context);
+            p.memoryTimer->setRepeating(true);
+            _memoryUpdate();
+            p.memoryTimer->start(
+                std::chrono::seconds(1),
+                [this]
+                {
+                    _memoryUpdate();
+                });
 
             p.messagesObserver = ftk::ListObserver<ftk::LogItem>::create(
                 app->getSysLogModel()->observeMessages(),
@@ -176,6 +199,12 @@ namespace djv
                 return;
             p.hint = value;
             _messagesUpdate();
+        }
+
+        void StatusBar::_memoryUpdate()
+        {
+            FTK_P();
+            p.memoryLabel->setText(getSystemMemoryLabel(getSystemMemory()));
         }
 
         void StatusBar::_messagesUpdate()

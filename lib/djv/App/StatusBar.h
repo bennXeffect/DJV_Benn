@@ -59,6 +59,7 @@ namespace djv
             ftk::Box2I _getToolBox(const std::string&) const;
 
             void _infoUpdate(const ftk::Path&, const tl::IOInfo&, int videoLayer);
+            void _memoryUpdate();
             void _messagesUpdate();
 
             FTK_PRIVATE();
