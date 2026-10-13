@@ -361,6 +361,7 @@ namespace djv
             // different shape, the position and the in/out range cannot be
             // carried over as they are, since both are in timeline time.
             void _reload(bool restructured);
+            void _autoReload();
             void _reloadUpdate(const std::shared_ptr<models::FilesModelItem>&);
             void _layersUpdate(const std::vector<int>&);
             void _mediaReferenceKeysUpdate(const std::vector<std::string>&);

@@ -178,6 +178,10 @@ namespace djv
             //! decodes sequences.
             size_t readThreadCount = tl::getDefaultReadThreadCount();
 
+            //! Reload the sequence being shown when frames are added to it
+            //! on disk, as they are while a render is running.
+            bool autoReload = true;
+
             tl::SeqOptions io;
 
             bool operator == (const ImageSeqSettings&) const = default;

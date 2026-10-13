@@ -979,6 +979,7 @@ namespace djv
             json["AudioFileName"] = value.audioFileName;
             json["MaxDigits"] = value.maxDigits;
             json["ReadThreadCount"] = value.readThreadCount;
+            json["AutoReload"] = value.autoReload;
             json["IO"] = value.io;
         }
 
@@ -1187,6 +1188,10 @@ namespace djv
             json.at("AudioFileName").get_to(value.audioFileName);
             json.at("MaxDigits").get_to(value.maxDigits);
             json.at("ReadThreadCount").get_to(value.readThreadCount);
+            if (json.contains("AutoReload"))
+            {
+                json.at("AutoReload").get_to(value.autoReload);
+            }
             json.at("IO").get_to(value.io);
         }
 

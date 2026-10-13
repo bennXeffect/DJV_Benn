@@ -1163,6 +1163,16 @@ namespace djv
             // fired while there was no window, so _markersUpdate() bailed out.
             _markersUpdate();
 
+            // Watch the sequence being shown for frames a render adds.
+            p.autoReloadTimer = ftk::Timer::create(_context);
+            p.autoReloadTimer->setRepeating(true);
+            p.autoReloadTimer->start(
+                std::chrono::seconds(2),
+                [this]
+                {
+                    _autoReload();
+                });
+
             // Start periodic crash-recovery autosave.
             p.autosaveTimer = ftk::Timer::create(_context);
             p.autosaveTimer->setRepeating(true);

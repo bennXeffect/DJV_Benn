@@ -520,6 +520,7 @@ namespace djv
             std::shared_ptr<ftk::IntEditSlider> missingIndicatorWidthEdit;
             std::shared_ptr<ftk::ColorSwatch> missingIndicatorColorSwatch;
             std::shared_ptr<ftk::IntEdit> threadsEdit;
+            std::shared_ptr<ftk::CheckBox> autoReloadCheckBox;
             std::shared_ptr<ftk::FormLayout> layout;
 
             std::shared_ptr<ftk::Observer<models::ImageSeqSettings> > settingsObserver;
@@ -615,6 +616,12 @@ namespace djv
             p.threadsEdit = ftk::IntEdit::create(context);
             p.threadsEdit->setRange(1, 64);
 
+            p.autoReloadCheckBox = ftk::CheckBox::create(context);
+            p.autoReloadCheckBox->setTooltip(
+                "Reload the sequence being shown when new frames appear on "
+                "disk, as they do while a render is running. Checked every "
+                "two seconds while playback is stopped.");
+
             p.layout = ftk::FormLayout::create(context);
 
             _setWidget(p.layout);
@@ -633,6 +640,7 @@ namespace djv
             p.layout->addRow("Indicator width:", p.missingIndicatorWidthEdit);
             p.layout->addRow("Indicator color:", p.missingIndicatorColorSwatch);
             p.layout->addRow("I/O threads:", p.threadsEdit);
+            p.layout->addRow("Auto-reload:", p.autoReloadCheckBox);
 
             // The indicator lives with the viewport's other drawing rather
             // than with the sequence settings, since it changes only what is
@@ -690,6 +698,16 @@ namespace djv
                     p.missingFramesComboBox->setCurrentIndex(
                         static_cast<int>(value.io.missingFrames));
                     p.threadsEdit->setValue(value.readThreadCount);
+                    p.autoReloadCheckBox->setChecked(value.autoReload);
+                });
+
+            p.autoReloadCheckBox->setCheckedCallback(
+                [this](bool value)
+                {
+                    FTK_P();
+                    models::ImageSeqSettings settings = p.settings->getImageSeq();
+                    settings.autoReload = value;
+                    p.settings->setImageSeq(settings);
                 });
 
             p.audioComboBox->setIndexCallback(

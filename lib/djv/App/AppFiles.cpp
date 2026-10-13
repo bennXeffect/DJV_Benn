@@ -421,6 +421,45 @@ namespace djv
             _reload(false);
         }
 
+        void App::_autoReload()
+        {
+            FTK_P();
+            const models::ImageSeqSettings imageSeq = p.settingsModel->getImageSeq();
+            if (!imageSeq.autoReload)
+            {
+                return;
+            }
+            auto a = p.filesModel->getA();
+            auto player = p.player->get();
+            // A sequence whose frames were found rather than stated, and
+            // only while stopped: a reload in the middle of playback would
+            // interrupt it, and one stopped catches up at the next check.
+            if (!a || a->framesStated || !player ||
+                tl::Playback::Stop != player->getPlayback())
+            {
+                return;
+            }
+            const ftk::Path& path = player->getPath();
+            if (!path.isSeq())
+            {
+                return;
+            }
+            ftk::PathOptions pathOptions;
+            pathOptions.seqMaxDigits = imageSeq.maxDigits;
+            const auto seq = ftk::findSeq(path, pathOptions);
+            if (seq.empty())
+            {
+                return;
+            }
+            ftk::Path found = path;
+            found.setSeq(seq);
+            if (found.getFrames() != path.getFrames() ||
+                found.getSeqSize() != path.getSeqSize())
+            {
+                reload();
+            }
+        }
+
         void App::_reload(bool restructured)
         {
             FTK_P();
@@ -740,6 +779,9 @@ namespace djv
                         // gone from disk keeps the range it had rather than
                         // becoming a timeline of nothing.
                         path.setSeq(seq);
+                        // And the file is named by what was found, so the
+                        // tab and the title follow a render that has grown.
+                        item->path.setSeq(seq);
                     }
                 }
                 auto timeline = tl::Timeline::create(

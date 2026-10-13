@@ -132,6 +132,8 @@ namespace djv
             std::optional<models::ReviewView> pendingReviewView;
             std::shared_ptr<ftk::Timer> reviewViewTimer;
             std::shared_ptr<ftk::Timer> autosaveTimer;
+            //! Watches the sequence being shown for frames added on disk.
+            std::shared_ptr<ftk::Timer> autoReloadTimer;
             std::optional<nlohmann::json> recoveredAutosave;
             std::vector<std::shared_ptr<tl::Timeline> > timelines;
             //! Whether opening a timeline has filled in what an item holds
