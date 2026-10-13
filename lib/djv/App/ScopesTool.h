@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright Contributors to the DJV project.
+
+#pragma once
+
+#include <djv/App/Export.h>
+#include <djv/App/IToolWidget.h>
+
+namespace djv
+{
+    namespace app
+    {
+        //! Magnify tool.
+        class DJV_APP_API_TYPE ScopesTool : public IToolWidget
+        {
+            FTK_NON_COPYABLE(ScopesTool);
+
+        protected:
+            void _init(
+                const std::shared_ptr<ftk::Context>&,
+                const std::shared_ptr<App>&,
+                const std::shared_ptr<MainWindow>&,
+                const std::shared_ptr<IWidget>& parent);
+
+            ScopesTool();
+
+        public:
+            DJV_APP_API virtual ~ScopesTool();
+
+            DJV_APP_API static std::shared_ptr<ScopesTool> create(
+                const std::shared_ptr<ftk::Context>&,
+                const std::shared_ptr<App>&,
+                const std::shared_ptr<MainWindow>&,
+                const std::shared_ptr<IWidget>& parent = nullptr);
+
+        private:
+            FTK_PRIVATE();
+        };
+    }
+}

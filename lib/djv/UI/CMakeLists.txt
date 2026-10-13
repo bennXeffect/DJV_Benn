@@ -20,6 +20,7 @@ set(HEADERS
     InfoWidget.h
     MagnifyWidget.h
     PixelProbe.h
+    ScopesWidget.h
     ViewWidgets.h
     Viewport.h
     ViewportBinding.h)
@@ -49,6 +50,7 @@ set(SOURCE
     InfoWidget.cpp
     MagnifyWidget.cpp
     PixelProbe.cpp
+    ScopesWidget.cpp
     ViewWidgets.cpp
     Viewport.cpp
     ViewportBinding.cpp)

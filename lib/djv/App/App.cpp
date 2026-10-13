@@ -17,6 +17,7 @@
 #include <djv/App/FilesTool.h>
 #include <djv/App/InfoTool.h>
 #include <djv/App/MagnifyTool.h>
+#include <djv/App/ScopesTool.h>
 #include <djv/App/MainWindow.h>
 #include <djv/App/MessagesTool.h>
 #include <djv/App/ReviewTool.h>
@@ -1108,6 +1109,7 @@ namespace djv
             p.toolWidgetFactory->addTool("Files", &FilesTool::create);
             p.toolWidgetFactory->addTool("Information", &InfoTool::create);
             p.toolWidgetFactory->addTool("Magnify", &MagnifyTool::create);
+            p.toolWidgetFactory->addTool("Scopes", &ScopesTool::create);
             p.toolWidgetFactory->addTool("Messages", &MessagesTool::create);
             p.toolWidgetFactory->addTool("Review", &ReviewTool::create);
             p.toolWidgetFactory->addTool("Settings", &SettingsTool::create);

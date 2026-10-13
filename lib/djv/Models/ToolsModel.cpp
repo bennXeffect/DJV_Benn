@@ -40,6 +40,7 @@ namespace djv
             p.tools.push_back({ "Color", "ColorControls", "D", true, ftk::Key::F4 });
             p.tools.push_back({ "Color Picker", "ColorPicker", "E", true, ftk::Key::F5 });
             p.tools.push_back({ "Magnify", "Magnify", "F", true, ftk::Key::F6 });
+            p.tools.push_back({ "Scopes", "Scopes", "F1", true, ftk::KeyShortcut(ftk::Key::F6, ftk::KeyModifier::Shift) });
             p.tools.push_back({ "Information", "Info", "G", true, ftk::Key::F7 });
             p.tools.push_back({ "Audio", "Audio", "H", true, ftk::Key::F8 });
             p.tools.push_back({ "Review", "Review", "I", true, ftk::Key::F9 });

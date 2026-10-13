@@ -27,6 +27,7 @@ set(HEADERS
     IToolWidget.h
     InfoTool.h
     MagnifyTool.h
+    ScopesTool.h
     MainWindow.h
     MessagesTool.h
     PlaybackActions.h
@@ -90,6 +91,7 @@ set(SOURCE
     InfoTool.cpp
     MainWindow.cpp
     MagnifyTool.cpp
+    ScopesTool.cpp
     MessagesTool.cpp
     PlaybackActions.cpp
     PlaybackMenu.cpp
