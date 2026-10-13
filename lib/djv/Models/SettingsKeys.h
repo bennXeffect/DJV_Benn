@@ -69,6 +69,7 @@ namespace djv
             constexpr const char* magnifyViewPosAndZoom = "/Magnify/ViewPosAndZoom";
             constexpr const char* timeUnits = "/TimeUnits";
             constexpr const char* toolsOpen = "/Tools/Open.1";
+            constexpr const char* viewportAlphaBlendAuto = "/Viewport/AlphaBlendAuto";
             constexpr const char* viewportAspectRatio = "/Viewport/AspectRatio.1";
             constexpr const char* viewportBackground = "/Viewport/Background";
             constexpr const char* viewportColorBuffer = "/Viewport/ColorBuffer";

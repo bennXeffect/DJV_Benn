@@ -18,7 +18,11 @@ namespace djv
             std::weak_ptr<tl::ui::Viewport> viewport;
             size_t videoFramesSize = 0;
             std::vector<std::string> ocioInputs;
+            //! The files being shown, in the order of the video frames, so
+            //! each can be given the alpha blend of its own type.
+            std::vector<ftk::Path> activePaths;
             ftk::ImageOptions imageOptions;
+            bool alphaBlendAuto = true;
             tl::DisplayOptions displayOptions;
             std::function<void(void)> changedCallback;
 
@@ -27,6 +31,8 @@ namespace djv
             std::shared_ptr<ftk::Observer<std::vector<std::string> > > resolvedInputsObserver;
             std::shared_ptr<ftk::Observer<tl::LUTOptions> > lutOptionsObserver;
             std::shared_ptr<ftk::Observer<ftk::ImageOptions> > imageOptionsObserver;
+            std::shared_ptr<ftk::Observer<bool> > alphaBlendAutoObserver;
+            std::shared_ptr<ftk::ListObserver<std::shared_ptr<models::FilesModelItem> > > activeObserver;
             std::shared_ptr<ftk::Observer<tl::DisplayOptions> > displayOptionsObserver;
             std::shared_ptr<ftk::Observer<tl::BackgroundOptions> > bgOptionsObserver;
             std::shared_ptr<ftk::Observer<ftk::ImageType> > colorBufferObserver;
@@ -103,6 +109,27 @@ namespace djv
                 [this](const ftk::ImageOptions& value)
                 {
                     _p->imageOptions = value;
+                    _videoUpdate();
+                });
+
+            p.alphaBlendAutoObserver = ftk::Observer<bool>::create(
+                viewportModel->observeAlphaBlendAuto(),
+                [this](bool value)
+                {
+                    _p->alphaBlendAuto = value;
+                    _videoUpdate();
+                });
+
+            p.activeObserver = ftk::ListObserver<std::shared_ptr<models::FilesModelItem> >::create(
+                filesModel->observeActive(),
+                [this](const std::vector<std::shared_ptr<models::FilesModelItem> >& value)
+                {
+                    FTK_P();
+                    p.activePaths.clear();
+                    for (const auto& item : value)
+                    {
+                        p.activePaths.push_back(item ? item->path : ftk::Path());
+                    }
                     _videoUpdate();
                 });
 
@@ -187,7 +214,10 @@ namespace djv
             std::vector<tl::DisplayOptions> displayOptions;
             for (size_t i = 0; i < p.videoFramesSize; ++i)
             {
-                imageOptions.push_back(p.imageOptions);
+                imageOptions.push_back(models::getFileImageOptions(
+                    p.imageOptions,
+                    p.alphaBlendAuto,
+                    i < p.activePaths.size() ? p.activePaths[i] : ftk::Path()));
                 displayOptions.push_back(p.displayOptions);
                 displayOptions.back().ocioInput =
                     i < p.ocioInputs.size() ? p.ocioInputs[i] : std::string();

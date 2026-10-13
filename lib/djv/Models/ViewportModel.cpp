@@ -38,6 +38,7 @@ namespace djv
             std::weak_ptr<ftk::Context> context;
             std::shared_ptr<ftk::Settings> settings;
             std::shared_ptr<ftk::Observable<ftk::ImageOptions> > imageOptions;
+            std::shared_ptr<ftk::Observable<bool> > alphaBlendAuto;
             std::shared_ptr<ftk::Observable<tl::DisplayOptions> > displayOptions;
             std::shared_ptr<ftk::Observable<AspectRatioOptions> > aspectRatioOptions;
             std::shared_ptr<ftk::Observable<tl::BackgroundOptions> > backgroundOptions;
@@ -61,6 +62,13 @@ namespace djv
             // before that says nothing about what the view was set to.
             p.settings->getT(settingsKeys::viewportImage, imageOptions);
             p.imageOptions = ftk::Observable<ftk::ImageOptions>::create(imageOptions);
+
+            // On unless turned off: a single blend for every file is wrong
+            // for one kind or the other -- OpenEXR renders shown straight
+            // get dark fringes, PNGs shown premultiplied get bright ones.
+            bool alphaBlendAuto = true;
+            p.settings->get(settingsKeys::viewportAlphaBlendAuto, alphaBlendAuto);
+            p.alphaBlendAuto = ftk::Observable<bool>::create(alphaBlendAuto);
 
             tl::DisplayOptions displayOptions;
             p.settings->getT(settingsKeys::viewportDisplay, displayOptions);
@@ -117,6 +125,7 @@ namespace djv
         {
             FTK_P();
             p.settings->setT(settingsKeys::viewportImage, p.imageOptions->get());
+            p.settings->set(settingsKeys::viewportAlphaBlendAuto, p.alphaBlendAuto->get());
             p.settings->setT(settingsKeys::viewportDisplay, p.displayOptions->get());
             p.settings->setT(settingsKeys::viewportAspectRatio, p.aspectRatioOptions->get());
             p.settings->setT(settingsKeys::viewportBackground, p.backgroundOptions->get());
@@ -147,6 +156,41 @@ namespace djv
         void ViewportModel::setImageOptions(const ftk::ImageOptions& value)
         {
             _p->imageOptions->setIfChanged(value);
+        }
+
+        bool ViewportModel::getAlphaBlendAuto() const
+        {
+            return _p->alphaBlendAuto->get();
+        }
+
+        std::shared_ptr<ftk::IObservable<bool> > ViewportModel::observeAlphaBlendAuto() const
+        {
+            return _p->alphaBlendAuto;
+        }
+
+        void ViewportModel::setAlphaBlendAuto(bool value)
+        {
+            _p->alphaBlendAuto->setIfChanged(value);
+        }
+
+        ftk::AlphaBlend getFileAlphaBlend(const ftk::Path& path)
+        {
+            return ".exr" == ftk::toLower(path.getExt()) ?
+                ftk::AlphaBlend::Premultiplied :
+                ftk::AlphaBlend::Straight;
+        }
+
+        ftk::ImageOptions getFileImageOptions(
+            const ftk::ImageOptions& options,
+            bool alphaBlendAuto,
+            const ftk::Path& path)
+        {
+            ftk::ImageOptions out = options;
+            if (alphaBlendAuto && !path.isEmpty())
+            {
+                out.alphaBlend = getFileAlphaBlend(path);
+            }
+            return out;
         }
 
         const tl::DisplayOptions& ViewportModel::getDisplayOptions() const

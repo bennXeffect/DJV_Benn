@@ -50,6 +50,7 @@ namespace djv
             std::shared_ptr<ftk::FormLayout> layout;
 
             std::shared_ptr<ftk::Observer<ftk::ImageOptions> > imageOptionsObserver;
+            std::shared_ptr<ftk::Observer<bool> > alphaBlendAutoObserver;
             std::shared_ptr<ftk::Observer<tl::DisplayOptions> > displayOptionsObserver;
             std::shared_ptr<ftk::Observer<ftk::ImageType> > colorBufferObserver;
         };
@@ -97,9 +98,19 @@ namespace djv
             p.videoLevelsComboBox->setHStretch(ftk::Stretch::Expanding);
             ftk::setScreenshotTag(p.videoLevelsComboBox, "View.Options.VideoLevels");
 
+            // "Auto" first: each file blended the way its type is written,
+            // then the fixed choices for every file at once.
+            std::vector<std::string> alphaBlendLabels = { "Auto (by file type)" };
+            for (const auto& label : ftk::getAlphaBlendLabels())
+            {
+                alphaBlendLabels.push_back(label);
+            }
             p.alphaBlendComboBox = ftk::ComboBox::create(
                 context,
-                ftk::getAlphaBlendLabels());
+                alphaBlendLabels);
+            p.alphaBlendComboBox->setTooltip(
+                "How the image's alpha is blended.\n"
+                "Auto: OpenEXR files premultiplied, other files straight.");
             p.alphaBlendComboBox->setHStretch(ftk::Stretch::Expanding);
             ftk::setScreenshotTag(p.alphaBlendComboBox, "View.Options.AlphaBlend");
 
@@ -130,13 +141,26 @@ namespace djv
 
             p.imageOptionsObserver = ftk::Observer<ftk::ImageOptions>::create(
                 viewportModel->observeImageOptions(),
-                [this](const ftk::ImageOptions& value)
+                [this, viewportModel](const ftk::ImageOptions& value)
                 {
                     FTK_P();
                     p.videoLevelsComboBox->setCurrentIndex(static_cast<int>(value.videoLevels));
-                    p.alphaBlendComboBox->setCurrentIndex(static_cast<int>(value.alphaBlend));
+                    p.alphaBlendComboBox->setCurrentIndex(
+                        viewportModel->getAlphaBlendAuto() ?
+                        0 :
+                        static_cast<int>(value.alphaBlend) + 1);
                     p.minifyComboBox->setCurrentIndex(static_cast<int>(value.imageFilters.minify));
                     p.magnifyComboBox->setCurrentIndex(static_cast<int>(value.imageFilters.magnify));
+                });
+
+            p.alphaBlendAutoObserver = ftk::Observer<bool>::create(
+                viewportModel->observeAlphaBlendAuto(),
+                [this, viewportModel](bool value)
+                {
+                    _p->alphaBlendComboBox->setCurrentIndex(
+                        value ?
+                        0 :
+                        static_cast<int>(viewportModel->getImageOptions().alphaBlend) + 1);
                 });
 
             p.displayOptionsObserver = ftk::Observer<tl::DisplayOptions>::create(
@@ -223,9 +247,17 @@ namespace djv
             p.alphaBlendComboBox->setIndexCallback(
                 [viewportModel](int value)
                 {
-                    auto options = viewportModel->getImageOptions();
-                    options.alphaBlend = static_cast<ftk::AlphaBlend>(value);
-                    viewportModel->setImageOptions(options);
+                    if (0 == value)
+                    {
+                        viewportModel->setAlphaBlendAuto(true);
+                    }
+                    else if (value > 0)
+                    {
+                        auto options = viewportModel->getImageOptions();
+                        options.alphaBlend = static_cast<ftk::AlphaBlend>(value - 1);
+                        viewportModel->setImageOptions(options);
+                        viewportModel->setAlphaBlendAuto(false);
+                    }
                 });
 
             p.colorBufferComboBox->setIndexCallback(

@@ -884,9 +884,22 @@ namespace djv
                     // Create the renderer.
                     p.exportData->ocioOptions = ocioOptions;
                     p.exportData->lutOptions = p.colorModel.lock()->getLUTOptions();
-                    p.exportData->imageOptions = std::vector<ftk::ImageOptions>(
-                        infos.size(),
-                        p.viewportModel.lock()->getImageOptions());
+                    // Each file's alpha blend, the same as the viewport.
+                    {
+                        auto viewportModel = p.viewportModel.lock();
+                        const auto active = p.filesModel.lock()->getActive();
+                        p.exportData->imageOptions.clear();
+                        for (size_t i = 0; i < infos.size(); ++i)
+                        {
+                            p.exportData->imageOptions.push_back(
+                                models::getFileImageOptions(
+                                    viewportModel->getImageOptions(),
+                                    viewportModel->getAlphaBlendAuto(),
+                                    i < active.size() && active[i] ?
+                                        active[i]->path :
+                                        ftk::Path()));
+                        }
+                    }
                     p.exportData->displayOptions = std::vector<tl::DisplayOptions>(
                         infos.size(),
                         displayOptions);

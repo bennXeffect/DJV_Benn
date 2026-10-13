@@ -60,6 +60,9 @@ namespace djv
             //! types.
             int videoLayer = 0;
             std::optional<OTIO_NS::RationalTime> currentTime;
+            //! The player's time range, for the position counted from the
+            //! start of the media rather than from frame zero.
+            std::optional<OTIO_NS::TimeRange> timeRange;
             double fps = 0.0;
             size_t droppedFrames = 0;
             size_t videoFramesSize = 0;
@@ -527,6 +530,7 @@ namespace djv
             if (player)
             {
                 p.path = player->getPath();
+                p.timeRange = player->getTimeRange();
 
                 // The information describes the media reference being read, so
                 // it is refreshed when the key changes. The observer also
@@ -604,6 +608,7 @@ namespace djv
             {
                 p.path = ftk::Path();
                 p.ioInfo = tl::IOInfo();
+                p.timeRange.reset();
                 setInputEnabled(false);
                 p.mediaReferenceKeyObserver.reset();
                 p.currentTime.reset();
@@ -1284,8 +1289,33 @@ namespace djv
             p.renderLabel->setVisible(!s.empty());
             ftk::setScreenshotTag(p.renderLabel, "View.HUD.Render");
 
+            // Every way of saying the time at once rather than the one the
+            // time units setting picks: the frame number that names the
+            // file, the position counted from the first frame of the media
+            // (renders seldom start at zero), the timecode and the seconds.
             s = std::string();
-            if (auto timeUnitsModel = p.timeUnitsModel.lock())
+            if (p.currentTime.has_value())
+            {
+                const OTIO_NS::RationalTime& t = p.currentTime.value();
+                std::vector<std::string> parts;
+                parts.push_back(tl::timeToText(t, tl::TimeUnits::Frames));
+                if (p.timeRange.has_value())
+                {
+                    const OTIO_NS::RationalTime start =
+                        p.timeRange->start_time().rescaled_to(t.rate());
+                    const int64_t index = static_cast<int64_t>(
+                        std::llround(t.value() - start.value()));
+                    const int64_t duration = static_cast<int64_t>(
+                        std::llround(p.timeRange->duration().rescaled_to(t.rate()).value()));
+                    parts.push_back(ftk::Format("#{0}/{1}").
+                        arg(index).
+                        arg(std::max(duration - 1, static_cast<int64_t>(0))));
+                }
+                parts.push_back(tl::timeToText(t, tl::TimeUnits::Timecode));
+                parts.push_back(tl::timeToText(t, tl::TimeUnits::Seconds) + "s");
+                s = ftk::join(parts, "  ");
+            }
+            else if (auto timeUnitsModel = p.timeUnitsModel.lock())
             {
                 s = timeUnitsModel->getLabel(p.currentTime);
             }

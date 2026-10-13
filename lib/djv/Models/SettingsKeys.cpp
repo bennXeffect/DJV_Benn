@@ -63,6 +63,7 @@ namespace djv
                 settingsKeys::magnifyViewPosAndZoom,
                 settingsKeys::timeUnits,
                 settingsKeys::toolsOpen,
+                settingsKeys::viewportAlphaBlendAuto,
                 settingsKeys::viewportAspectRatio,
                 settingsKeys::viewportBackground,
                 settingsKeys::viewportColorBuffer,

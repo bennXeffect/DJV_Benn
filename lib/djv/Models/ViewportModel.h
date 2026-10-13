@@ -11,6 +11,8 @@
 
 #include <ftk/Core/Image.h>
 #include <ftk/Core/Observable.h>
+#include <ftk/Core/Path.h>
+#include <ftk/Core/RenderOptions.h>
 
 namespace ftk
 {
@@ -115,6 +117,16 @@ namespace djv
             DJV_MODELS_API std::shared_ptr<ftk::IObservable<ftk::ImageOptions> > observeImageOptions() const;
             DJV_MODELS_API void setImageOptions(const ftk::ImageOptions&);
 
+            //! Get whether the alpha blend follows each file's type (see
+            //! getFileAlphaBlend()) rather than the image options.
+            DJV_MODELS_API bool getAlphaBlendAuto() const;
+
+            //! Observe whether the alpha blend follows each file's type.
+            DJV_MODELS_API std::shared_ptr<ftk::IObservable<bool> > observeAlphaBlendAuto() const;
+
+            //! Set whether the alpha blend follows each file's type.
+            DJV_MODELS_API void setAlphaBlendAuto(bool);
+
             ///@}
 
             //! \name Display Options
@@ -176,6 +188,19 @@ namespace djv
 
         //! \name Serialize
         ///@{
+
+        //! Get the alpha blend a file is written with, from its type.
+        //! OpenEXR stores premultiplied (associated) alpha by definition, and
+        //! that is what renderers such as Blender write; the other formats
+        //! are taken as straight, which is what PNG requires.
+        DJV_MODELS_API ftk::AlphaBlend getFileAlphaBlend(const ftk::Path&);
+
+        //! Get the image options for a file: the alpha blend from the file's
+        //! type when automatic, the options as they are otherwise.
+        DJV_MODELS_API ftk::ImageOptions getFileImageOptions(
+            const ftk::ImageOptions&,
+            bool alphaBlendAuto,
+            const ftk::Path&);
 
         DJV_MODELS_API void to_json(nlohmann::json&, const AspectRatioOptions&);
         DJV_MODELS_API void to_json(nlohmann::json&, const HUDOptions&);
