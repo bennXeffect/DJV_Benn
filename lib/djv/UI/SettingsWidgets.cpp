@@ -168,9 +168,13 @@ namespace djv
                 "long file uses all of it.");
 
             p.readBehindEdit = ftk::FloatEdit::create(context);
-            p.readBehindEdit->setRange(0.F, 10.F);
-            p.readBehindEdit->setStep(0.1);
-            p.readBehindEdit->setLargeStep(1.0);
+            p.readBehindEdit->setRange(0.F, 50.F);
+            p.readBehindEdit->setStep(1.0);
+            p.readBehindEdit->setLargeStep(5.0);
+            p.readBehindEdit->setTooltip(
+                "The share of the video cache kept for the frames before the "
+                "playhead; the rest is for the frames after it. Both fill from "
+                "the playhead outwards.");
 
             p.thumbnailEdit = ftk::FloatEdit::create(context);
             p.thumbnailEdit->setRange(0.F, 1024.F);
@@ -213,7 +217,7 @@ namespace djv
             hLayout = ftk::HorizontalLayout::create(context);
             hLayout->setSpacingRole(ftk::SizeRole::SpacingSmall);
             p.readBehindEdit->setParent(hLayout);
-            ftk::Label::create(context, "seconds", hLayout);
+            ftk::Label::create(context, "% of the video cache", hLayout);
             p.layout->addRow("Read behind:", hLayout);
             hLayout = ftk::HorizontalLayout::create(context);
             hLayout->setSpacingRole(ftk::SizeRole::SpacingSmall);
@@ -233,7 +237,7 @@ namespace djv
                     FTK_P();
                     p.videoEdit->setValue(value.videoGB);
                     p.audioEdit->setValue(value.audioGB);
-                    p.readBehindEdit->setValue(value.readBehind);
+                    p.readBehindEdit->setValue(std::max(value.readBehindPercent, 0.F));
                 });
 
             p.thumbnailCacheObserver = ftk::Observer<tl::ui::ThumbnailCacheOptions>::create(
@@ -268,7 +272,7 @@ namespace djv
                 {
                     FTK_P();
                     tl::PlayerCacheOptions options = p.settings->getCache();
-                    options.readBehind = value;
+                    options.readBehindPercent = value;
                     p.settings->setCache(options);
                 });
 

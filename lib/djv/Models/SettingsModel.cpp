@@ -451,7 +451,7 @@ namespace djv
         {
             FTK_P();
             setAudio(AudioSettings());
-            setCache(tl::PlayerCacheOptions());
+            setCache(getDefaultCache());
             setThumbnailCache(tl::ui::ThumbnailCacheOptions());
             setExport(ExportSettings());
             setFileBrowser(FileBrowserSettings());
@@ -494,6 +494,9 @@ namespace djv
             // having on a workstation and not a problem on a laptop; the
             // default was the same four gigabytes whatever the machine had.
             out.videoGB = std::max(getMaxCacheGB() / 4.F, 1.F);
+            // A quarter of the cache behind the playhead and the rest ahead
+            // of it, whatever the size of the cache or the frame rate.
+            out.readBehindPercent = 25.F;
             return out;
         }
 
