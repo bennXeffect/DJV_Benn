@@ -129,6 +129,7 @@ namespace djv
             void _compareUpdate();
             void _hudUpdate();
             void _hudLayout();
+            void _probeUpdate();
 
             FTK_PRIVATE();
         };

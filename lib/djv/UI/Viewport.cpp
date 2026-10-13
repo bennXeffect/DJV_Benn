@@ -3,6 +3,7 @@
 
 #include <djv/UI/Viewport.h>
 
+#include <djv/UI/PixelProbe.h>
 #include <djv/UI/ViewportBinding.h>
 
 #include <djv/Models/AnnotationsModel.h>
@@ -19,6 +20,7 @@
 #include <ftk/UI/ColorSwatch.h>
 #include <ftk/UI/IWindow.h>
 #include <ftk/UI/Label.h>
+#include <ftk/UI/Menu.h>
 #include <ftk/UI/SysLogModel.h>
 #include <ftk/UI/RowLayout.h>
 #include <ftk/UI/ScreenshotTag.h>
@@ -98,6 +100,15 @@ namespace djv
             bool toastHint = false;
             bool hudActive = true;
             std::shared_ptr<ftk::Label> toastLabel;
+            //! The pixel probe, shown while the right button is held.
+            std::shared_ptr<ftk::HorizontalLayout> probeLayout;
+            std::shared_ptr<ftk::ColorSwatch> probeSwatch;
+            std::shared_ptr<ftk::Label> probeLabel;
+            bool probing = false;
+            //! A context menu opened on a right click that did not drag,
+            //! kept while it is open.
+            std::shared_ptr<ftk::Menu> probeMenu;
+            std::weak_ptr<models::ColorModel> colorModel;
             std::shared_ptr<ViewportBinding> binding;
             std::shared_ptr<ftk::Timer> toastTimer;
             std::shared_ptr<ftk::VerticalLayout> hudLayout;
@@ -129,11 +140,14 @@ namespace djv
                 None,
                 Shuttle,
                 Draw,
-                Erase
+                Erase,
+                Probe
             };
             struct MouseData
             {
                 MouseMode mode = MouseMode::None;
+                ftk::V2I probePress;
+                bool probeMoved = false;
                 std::optional<OTIO_NS::RationalTime> shuttleStart;
                 tl::Playback shuttlePlayback = tl::Playback::Stop;
             };
@@ -166,6 +180,7 @@ namespace djv
             setClipChildren(true);
 
             p.filesModel = filesModel;
+            p.colorModel = colorModel;
             p.annotationsModel = annotationsModel;
             p.drawModel = drawModel;
             p.viewportModel = viewportModel;
@@ -277,6 +292,25 @@ namespace djv
             spacer = ftk::Spacer::create(
                 context, ftk::Orientation::Horizontal, toastLayout);
             spacer->setStretch(ftk::Stretch::Expanding);
+            // The pixel probe, over the bottom row, as Blender shows its
+            // image sample at the bottom of the editor.
+            p.probeSwatch = ftk::ColorSwatch::create(context);
+            p.probeSwatch->setVAlign(ftk::VAlign::Center);
+            p.probeLabel = ftk::Label::create(context);
+            p.probeLabel->setFont(ftk::FontType::Mono);
+            p.probeLabel->setMarginRole(ftk::SizeRole::MarginSmall);
+            auto probeRow = ftk::HorizontalLayout::create(context, bottomLayout);
+            p.probeLayout = ftk::HorizontalLayout::create(context, probeRow);
+            p.probeLayout->setSpacingRole(ftk::SizeRole::SpacingSmall);
+            p.probeLayout->setMarginRole(ftk::SizeRole::MarginInside);
+            p.probeLayout->setBackgroundRole(ftk::ColorRole::Overlay);
+            p.probeSwatch->setParent(p.probeLayout);
+            p.probeLabel->setParent(p.probeLayout);
+            spacer = ftk::Spacer::create(
+                context, ftk::Orientation::Horizontal, probeRow);
+            spacer->setStretch(ftk::Stretch::Expanding);
+            p.probeLayout->setVisible(false);
+
             auto bottomRowLayout = ftk::HorizontalLayout::create(context, bottomLayout);
             bottomRowLayout->setSpacingRole(ftk::SizeRole::SpacingSmall);
             bottomRowLayout->setVAlign(ftk::VAlign::Bottom);
@@ -486,6 +520,7 @@ namespace djv
                 [this](const std::optional<ftk::Color4F>&)
                 {
                     _hudUpdate();
+                    _probeUpdate();
                 });
         }
 
@@ -681,6 +716,17 @@ namespace djv
             case Private::MouseMode::Erase:
                 _erase(event.pos - getGeometry().min);
                 break;
+            case Private::MouseMode::Probe:
+            {
+                const ftk::V2I d = event.pos - p.mouse.probePress;
+                if (std::abs(d.x) > 3 || std::abs(d.y) > 3)
+                {
+                    p.mouse.probeMoved = true;
+                }
+                sample(toViewportPos(event.pos));
+                _probeUpdate();
+                break;
+            }
             case Private::MouseMode::Shuttle:
                 if (auto player = getPlayer())
                 {
@@ -719,6 +765,26 @@ namespace djv
             // view that takes no input.
             if (!isInputEnabled())
             {
+                return;
+            }
+
+            // The plain right button samples the pixel under the pointer
+            // while it is held, as in Blender's image editor. A right click
+            // that does not move still opens the context menu, on release.
+            // A right button bound to something in the settings keeps it.
+            if (ftk::MouseButton::Right == event.button &&
+                0 == event.modifiers &&
+                !event.accept)
+            {
+                event.accept = true;
+                takeKeyFocus();
+                p.mouse.mode = Private::MouseMode::Probe;
+                p.mouse.probePress = event.pos;
+                p.mouse.probeMoved = false;
+                p.probing = true;
+                sample(toViewportPos(event.pos));
+                p.probeLayout->setVisible(true);
+                _probeUpdate();
                 return;
             }
 
@@ -771,6 +837,27 @@ namespace djv
         {
             tl::ui::Viewport::mouseReleaseEvent(event);
             FTK_P();
+            if (Private::MouseMode::Probe == p.mouse.mode)
+            {
+                p.mouse.mode = Private::MouseMode::None;
+                p.probing = false;
+                p.probeLayout->setVisible(false);
+                if (!p.mouse.probeMoved && !event.cancel)
+                {
+                    const auto& callback = getContextMenuCallback();
+                    if (callback)
+                    {
+                        auto menu = callback();
+                        auto window = getWindow();
+                        if (menu && !menu->isEmpty() && window)
+                        {
+                            p.probeMenu = menu;
+                            menu->open(window, event.pos);
+                        }
+                    }
+                }
+                return;
+            }
             if (Private::MouseMode::Draw == p.mouse.mode)
             {
                 // Commit the stroke as one undoable step, unless the press
@@ -1425,6 +1512,38 @@ namespace djv
             // that a capture says whether anything was drawn over the image
             // rather than only what it would have said.
             ftk::setScreenshotTag(p.toastLabel, visible ? "View.Toast" : "");
+        }
+
+        void Viewport::_probeUpdate()
+        {
+            FTK_P();
+            if (!p.probing)
+            {
+                return;
+            }
+            const auto& pick = observePick()->get();
+            const auto& display = observeColorSample()->get();
+            std::optional<ftk::Color4F> file;
+            if (pick.has_value() && !p.videoFrames.empty())
+            {
+                for (const auto& layer : p.videoFrames.front().layers)
+                {
+                    if (layer.image)
+                    {
+                        file = readPixel(layer.image, pick.value());
+                        break;
+                    }
+                }
+            }
+            std::string colorSpace;
+            if (auto colorModel = p.colorModel.lock())
+            {
+                colorSpace = colorModel->observeResolvedInput()->get();
+            }
+            p.probeSwatch->setColor(display.has_value() ? display.value() : ftk::Color4F());
+            p.probeLabel->setText(pick.has_value() ?
+                getPixelProbeText(pick.value(), file, display, getLumaWeights(colorSpace)) :
+                std::string("Outside the image"));
         }
 
         void Viewport::_hudLayout()
