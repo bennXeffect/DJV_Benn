@@ -63,6 +63,9 @@
 #include <ftk/Core/OS.h>
 #include <ftk/Core/Timer.h>
 
+#include <chrono>
+#include <cstdlib>
+
 #include <ctime>
 #include <ftk/Core/Path.h>
 
@@ -1166,6 +1169,38 @@ namespace djv
             // Same for the timeline markers: the notes and annotations observers
             // fired while there was no window, so _markersUpdate() bailed out.
             _markersUpdate();
+
+            // A measurement of how fast the video cache fills, for tuning
+            // the readers: the frames cached, every second, to the log.
+            if (std::getenv("DJV_CACHE_BENCH"))
+            {
+                p.cacheBenchStart = std::chrono::steady_clock::now();
+                p.cacheBenchTimer = ftk::Timer::create(_context);
+                p.cacheBenchTimer->setRepeating(true);
+                p.cacheBenchTimer->start(
+                    std::chrono::seconds(1),
+                    [this]
+                    {
+                        FTK_P();
+                        auto player = p.player->get();
+                        if (!player)
+                            return;
+                        double frames = 0.0;
+                        for (const auto& range : player->observeCacheInfo()->get().video)
+                        {
+                            frames += range.duration().value();
+                        }
+                        const double seconds = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - p.cacheBenchStart).count();
+                        _context->log(
+                            "djv::app::CacheBench",
+                            ftk::Format("t={0}s frames={1} +{2}/s").
+                                arg(seconds, 1).
+                                arg(frames, 0).
+                                arg(frames - p.cacheBenchFrames, 0));
+                        p.cacheBenchFrames = frames;
+                    });
+            }
 
             // Watch the sequence being shown for frames a render adds.
             p.autoReloadTimer = ftk::Timer::create(_context);

@@ -61,7 +61,7 @@ namespace djv
             std::vector<Layer> layers;
 
             //! The frame rate of the stack.
-            double rate = 24.0;
+            double rate = 30.0;
 
             bool operator == (const LayerStack&) const = default;
         };

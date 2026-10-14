@@ -56,7 +56,7 @@ namespace djv
             const std::string& fileName,
             const LayerStack& stack)
         {
-            const double rate = stack.rate > 0.0 ? stack.rate : 24.0;
+            const double rate = stack.rate > 0.0 ? stack.rate : 30.0;
 
             // The stack starts where its earliest layer does, so the
             // timeline counts the frames the renders are numbered with.

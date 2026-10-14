@@ -34,6 +34,7 @@
 #include <ftk/Core/CmdLine.h>
 #include <ftk/Core/Timer.h>
 
+#include <chrono>
 #include <filesystem>
 #include <optional>
 
@@ -134,6 +135,10 @@ namespace djv
             std::shared_ptr<ftk::Timer> autosaveTimer;
             //! Watches the sequence being shown for frames added on disk.
             std::shared_ptr<ftk::Timer> autoReloadTimer;
+            //! With DJV_CACHE_BENCH set, logs how fast the video cache fills.
+            std::shared_ptr<ftk::Timer> cacheBenchTimer;
+            std::chrono::steady_clock::time_point cacheBenchStart;
+            double cacheBenchFrames = 0.0;
             std::optional<nlohmann::json> recoveredAutosave;
             std::vector<std::shared_ptr<tl::Timeline> > timelines;
             //! Whether opening a timeline has filled in what an item holds
