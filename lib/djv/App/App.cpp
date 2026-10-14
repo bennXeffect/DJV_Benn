@@ -1186,18 +1186,24 @@ namespace djv
                         if (!player)
                             return;
                         double frames = 0.0;
+                        std::vector<std::string> ranges;
                         for (const auto& range : player->observeCacheInfo()->get().video)
                         {
                             frames += range.duration().value();
+                            ranges.push_back(ftk::Format("{0}-{1}").
+                                arg(range.start_time().value(), 0).
+                                arg(range.end_time_inclusive().value(), 0));
                         }
                         const double seconds = std::chrono::duration<double>(
                             std::chrono::steady_clock::now() - p.cacheBenchStart).count();
                         _context->log(
                             "djv::app::CacheBench",
-                            ftk::Format("t={0}s frames={1} +{2}/s").
+                            ftk::Format("t={0}s frames={1} +{2}/s at {3}: {4}").
                                 arg(seconds, 1).
                                 arg(frames, 0).
-                                arg(frames - p.cacheBenchFrames, 0));
+                                arg(frames - p.cacheBenchFrames, 0).
+                                arg(player->getCurrentTime().value(), 0).
+                                arg(ftk::join(ranges, " ")));
                         p.cacheBenchFrames = frames;
                     });
             }
