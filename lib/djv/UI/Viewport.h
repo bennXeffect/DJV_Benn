@@ -97,6 +97,7 @@ namespace djv
             DJV_UI_API ftk::Size2I getSizeHint() const override;
             DJV_UI_API void setGeometry(const ftk::Box2I&) override;
             DJV_UI_API void drawEvent(const ftk::Box2I&, const ftk::DrawEvent&) override;
+            DJV_UI_API void drawOverlayEvent(const ftk::Box2I&, const ftk::DrawEvent&) override;
             DJV_UI_API void mouseMoveEvent(ftk::MouseMoveEvent&) override;
             DJV_UI_API void mousePressEvent(ftk::MouseClickEvent&) override;
             DJV_UI_API void mouseReleaseEvent(ftk::MouseClickEvent&) override;
@@ -152,7 +153,7 @@ namespace djv
             void _loupeGeometry();
             void _probeAt(const ftk::V2I& windowPos);
             void _probeMove(const ftk::V2F&);
-            void _shuttleMove(float dx);
+            void _shuttleMove(const ftk::V2F&);
             void _shuttleEnd();
             void _shuttleLog(const std::string&);
 
