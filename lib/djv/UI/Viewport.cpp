@@ -3,6 +3,7 @@
 
 #include <djv/UI/Viewport.h>
 
+#include <djv/UI/CursorWarp.h>
 #include <djv/UI/PixelLoupe.h>
 #include <djv/UI/PixelProbe.h>
 #include <djv/UI/ViewportBinding.h>
@@ -112,6 +113,12 @@ namespace djv
             std::shared_ptr<PixelLoupe> loupe;
             int probeAverage = 0;
             ftk::V2I probeWindowPos;
+            //! Where the probe is, to a fraction of a pixel: the pointer
+            //! moves slower than the hand while probing, and the fractions
+            //! add up.
+            ftk::V2F probeVirtual;
+            //! Where the last event left the pointer.
+            ftk::V2I probeLastPos;
             //! A context menu opened on a right click that did not drag,
             //! kept while it is open.
             std::shared_ptr<ftk::Menu> probeMenu;
@@ -154,6 +161,7 @@ namespace djv
             {
                 MouseMode mode = MouseMode::None;
                 ftk::V2I probePress;
+                int probeTravel = 0;
                 bool probeMoved = false;
                 std::optional<OTIO_NS::RationalTime> shuttleStart;
                 tl::Playback shuttlePlayback = tl::Playback::Stop;
@@ -739,12 +747,42 @@ namespace djv
                 break;
             case Private::MouseMode::Probe:
             {
-                const ftk::V2I d = event.pos - p.mouse.probePress;
-                if (std::abs(d.x) > 3 || std::abs(d.y) > 3)
+                // The hand's movement, before it is slowed: what tells a
+                // click for the context menu from a drag.
+                const ftk::V2I d = event.pos - p.probeLastPos;
+                p.mouse.probeTravel += std::abs(d.x) + std::abs(d.y);
+                if (p.mouse.probeTravel > 3)
                 {
                     p.mouse.probeMoved = true;
                 }
-                _probeAt(event.pos);
+                // Slowed to about four of the hand's pixels for a pixel of
+                // the picture, so the picture in the loupe goes by at half
+                // the hand's speed; zoomed in far enough that its pixels
+                // are big on screen, the pointer goes at its own speed.
+                const double factor = std::max(1.0, 4.0 / std::max(getZoom(), 0.0001));
+                p.probeVirtual.x += d.x / factor;
+                p.probeVirtual.y += d.y / factor;
+                const ftk::V2I target(
+                    static_cast<int>(std::lround(p.probeVirtual.x)),
+                    static_cast<int>(std::lround(p.probeVirtual.y)));
+                _probeAt(target);
+                if (p.probeWindowPos != target)
+                {
+                    // Held at the edge of the picture: coming back starts
+                    // from the edge, not from wherever the hand went past it.
+                    p.probeVirtual = ftk::V2F(p.probeWindowPos.x, p.probeWindowPos.y);
+                }
+                // The pointer follows the probe, so it is where the hand
+                // feels it is.
+                if (p.probeWindowPos != event.pos &&
+                    warpCursor(event.pos, p.probeWindowPos))
+                {
+                    p.probeLastPos = p.probeWindowPos;
+                }
+                else
+                {
+                    p.probeLastPos = event.pos;
+                }
                 _probeUpdate();
                 break;
             }
@@ -801,7 +839,10 @@ namespace djv
                 takeKeyFocus();
                 p.mouse.mode = Private::MouseMode::Probe;
                 p.mouse.probePress = event.pos;
+                p.mouse.probeTravel = 0;
                 p.mouse.probeMoved = false;
+                p.probeVirtual = ftk::V2F(event.pos.x, event.pos.y);
+                p.probeLastPos = event.pos;
                 p.probing = true;
                 p.probeLayout->setVisible(true);
                 // The pixel alone to start with; the wheel widens it.
