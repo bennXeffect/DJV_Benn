@@ -167,6 +167,9 @@ namespace djv
             std::shared_ptr<PixelLoupe> loupe;
             int probeAverage = 0;
             ftk::V2I probeWindowPos;
+            //! The pick binding of the settings, which starts the probe too.
+            models::MouseActionBinding pickBinding;
+            std::shared_ptr<ftk::Observable<std::optional<PixelSample> > > pixelSample;
             //! Where the probe is, to a fraction of a pixel: the pointer
             //! moves slower than the hand while probing, and the fractions
             //! add up.
@@ -208,6 +211,7 @@ namespace djv
             std::shared_ptr<ftk::Observer<models::MouseSettings> > mouseSettingsObserver;
             std::shared_ptr<ftk::Observer<std::optional<ftk::V2I> > > pickObserver;
             std::shared_ptr<ftk::Observer<std::optional<ftk::Color4F> > > colorSampleObserver;
+            std::shared_ptr<ftk::Observer<std::optional<PixelSample> > > pixelSampleObserver;
             std::shared_ptr<ftk::ListObserver<models::ReviewAnnotation> > annotationsObserver;
 
             enum class MouseMode
@@ -224,6 +228,9 @@ namespace djv
                 ftk::V2I probePress;
                 int probeTravel = 0;
                 bool probeMoved = false;
+                //! Whether the right button started the probe: a click of it
+                //! that does not move opens the context menu.
+                bool probeRightButton = false;
                 std::optional<OTIO_NS::RationalTime> shuttleStart;
                 tl::Playback shuttlePlayback = tl::Playback::Stop;
             };
@@ -394,6 +401,7 @@ namespace djv
                 viewportModel,
                 shared_from_this());
             p.loupe->setVisible(false);
+            p.pixelSample = ftk::Observable<std::optional<PixelSample> >::create();
 
             auto bottomRowLayout = ftk::HorizontalLayout::create(context, bottomLayout);
             bottomRowLayout->setSpacingRole(ftk::SizeRole::SpacingSmall);
@@ -571,10 +579,13 @@ namespace djv
                     setWipeBinding(
                         i != value.bindings.end() ? i->second.button : ftk::MouseButton::None,
                         i != value.bindings.end() ? i->second.modifier : ftk::KeyModifier::None);
+                    // The pick binding starts the probe, as the right button
+                    // does, rather than the base class's picker: that reads a
+                    // pixel of the screen, which zoomed out is several of the
+                    // picture's blended.
                     i = value.bindings.find(models::MouseAction::Pick);
-                    setPickBinding(
-                        i != value.bindings.end() ? i->second.button : ftk::MouseButton::None,
-                        i != value.bindings.end() ? i->second.modifier : ftk::KeyModifier::None);
+                    p.pickBinding = i != value.bindings.end() ? i->second : models::MouseActionBinding();
+                    setPickBinding(ftk::MouseButton::None, ftk::KeyModifier::None);
                     i = value.bindings.find(models::MouseAction::FrameShuttle);
                     p.frameShuttleBinding = i != value.bindings.end() ? i->second : models::MouseActionBinding();
                     p.frameShuttleScale = value.frameShuttleScale;
@@ -605,6 +616,13 @@ namespace djv
                 {
                     _hudUpdate();
                     _probeUpdate();
+                });
+
+            p.pixelSampleObserver = ftk::Observer<std::optional<PixelSample> >::create(
+                p.pixelSample,
+                [this](const std::optional<PixelSample>&)
+                {
+                    _hudUpdate();
                 });
         }
 
@@ -870,9 +888,14 @@ namespace djv
             // while it is held, as in Blender's image editor. A right click
             // that does not move still opens the context menu, on release.
             // A right button bound to something in the settings keeps it.
-            if (ftk::MouseButton::Right == event.button &&
-                0 == event.modifiers &&
-                !event.accept)
+            const bool rightButton =
+                ftk::MouseButton::Right == event.button &&
+                0 == event.modifiers;
+            const bool pickBinding =
+                p.pickBinding.button != ftk::MouseButton::None &&
+                p.pickBinding.button == event.button &&
+                ftk::checkKeyModifier(p.pickBinding.modifier, event.modifiers);
+            if ((rightButton || pickBinding) && !event.accept)
             {
                 event.accept = true;
                 takeKeyFocus();
@@ -880,6 +903,7 @@ namespace djv
                 p.mouse.probePress = event.pos;
                 p.mouse.probeTravel = 0;
                 p.mouse.probeMoved = false;
+                p.mouse.probeRightButton = rightButton;
                 p.probeVirtual = ftk::V2F(event.pos.x, event.pos.y);
                 p.probeLastPos = event.pos;
 #if defined(FTK_SDL3)
@@ -922,11 +946,6 @@ namespace djv
                 p.probeAverage = 0;
                 p.loupe->setAverage(p.probeAverage);
                 p.loupe->setVisible(true);
-                // The HUD's color picker reads a pixel of the screen, which
-                // zoomed out is several of the picture's blended, so beside
-                // the probe it disagreed with it. Out of the way while
-                // probing.
-                p.hudWidgets[models::HUDItem::ColorPicker]->setVisible(false);
                 _probeAt(event.pos);
                 _probeUpdate();
                 return;
@@ -987,7 +1006,6 @@ namespace djv
                 p.probing = false;
                 p.probeLayout->setVisible(false);
                 p.loupe->setVisible(false);
-                p.hudWidgets[models::HUDItem::ColorPicker]->setVisible(true);
 #if defined(FTK_SDL3)
                 if (p.probeSDLWindow)
                 {
@@ -1002,7 +1020,7 @@ namespace djv
                     p.probeSDLWindow = nullptr;
                 }
 #endif // FTK_SDL3
-                if (!p.mouse.probeMoved && !event.cancel)
+                if (p.mouse.probeRightButton && !p.mouse.probeMoved && !event.cancel)
                 {
                     const auto& callback = getContextMenuCallback();
                     if (callback)
@@ -1598,10 +1616,21 @@ namespace djv
                 arg(p.viewZoom, 2, 6));
             ftk::setScreenshotTag(p.viewZoomLabel, "View.HUD.ViewZoom");
 
-            const auto& colorSample = observeColorSample()->get();
-            const auto& pick = observePick()->get();
-            p.colorPickerSwatch->setColor(
-                colorSample.has_value() ? colorSample.value() : ftk::Color4F());
+            // The probe's last sample: the picture's pixel as displayed.
+            const auto& pixelSample = p.pixelSample->get();
+            std::optional<ftk::Color4F> colorSample;
+            std::optional<ftk::V2I> pick;
+            if (pixelSample.has_value())
+            {
+                colorSample = pixelSample->display;
+                pick = pixelSample->pixel;
+            }
+            {
+                // Opaque, as the probe's swatch.
+                ftk::Color4F swatch = colorSample.has_value() ? colorSample.value() : ftk::Color4F();
+                swatch.a = 1.F;
+                p.colorPickerSwatch->setColor(swatch);
+            }
             // The HUD sits under the pointer, so a line that changes width
             // as values come and go moves exactly where the eye is. The
             // widths hold a sign and two digits, so the ordinary zero to one
@@ -1733,11 +1762,30 @@ namespace djv
             {
                 colorSpace = colorModel->observeResolvedInput()->get();
             }
-            p.probeSwatch->setColor(display.has_value() ? display.value() : ftk::Color4F());
+            // Opaque: the swatch is what is on screen. A pixel can add light
+            // and cover nothing -- the glow of a premultiplied render has
+            // color and no alpha -- and drawn with its alpha it was black.
+            ftk::Color4F swatch = display.has_value() ? display.value() : ftk::Color4F();
+            swatch.a = 1.F;
+            p.probeSwatch->setColor(swatch);
             p.loupe->setAverageColor(display);
+            if (pick.has_value())
+            {
+                PixelSample sample;
+                sample.pixel = pick.value();
+                sample.display = display;
+                sample.file = file;
+                sample.average = p.probeAverage;
+                p.pixelSample->setIfChanged(sample);
+            }
             p.probeLabel->setText(pick.has_value() ?
                 getPixelProbeText(pick.value(), file, display, getLumaWeights(colorSpace)) :
                 std::string("Outside the image"));
+        }
+
+        std::shared_ptr<ftk::IObservable<std::optional<PixelSample> > > Viewport::observePixelSample() const
+        {
+            return _p->pixelSample;
         }
 
         void Viewport::scrollEvent(ftk::ScrollEvent& event)

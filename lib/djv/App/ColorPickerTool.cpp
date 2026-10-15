@@ -23,11 +23,11 @@ namespace djv
         {
             std::shared_ptr<ftk::ColorSwatch> colorSwatch;
             std::shared_ptr<ftk::Label> colorLabel;
+            std::shared_ptr<ftk::Label> fileLabel;
             std::shared_ptr<ftk::Label> pixelLabel;
             std::shared_ptr<ftk::Label> mouseLabel;
 
-            std::shared_ptr<ftk::Observer<std::optional<ftk::V2I> > > pickObserver;
-            std::shared_ptr<ftk::Observer<std::optional<ftk::Color4F> > > colorSampleObserver;
+            std::shared_ptr<ftk::Observer<std::optional<ui::PixelSample> > > pixelSampleObserver;
             std::shared_ptr<ftk::Observer<models::MouseSettings> > settingsObserver;
         };
 
@@ -56,6 +56,11 @@ namespace djv
             p.colorLabel->setFont(ftk::FontType::Mono);
             ftk::setScreenshotTag(p.colorLabel, "ColorPicker.Color");
 
+            p.fileLabel = ftk::Label::create(context);
+            p.fileLabel->setFont(ftk::FontType::Mono);
+            p.fileLabel->setTooltip("The values stored in the file, before color management.");
+            ftk::setScreenshotTag(p.fileLabel, "ColorPicker.File");
+
             p.pixelLabel = ftk::Label::create(context);
             p.pixelLabel->setFont(ftk::FontType::Mono);
             ftk::setScreenshotTag(p.pixelLabel, "ColorPicker.Pixel");
@@ -69,41 +74,58 @@ namespace djv
             auto formLayout = ftk::FormLayout::create(context, layout);
             formLayout->setMarginRole(ftk::SizeRole::Margin);
             formLayout->setSpacingRole(ftk::SizeRole::SpacingSmall);
-            formLayout->addRow("Color:", p.colorLabel);
+            formLayout->addRow("Displayed:", p.colorLabel);
+            formLayout->addRow("File:", p.fileLabel);
             formLayout->addRow("Pixel:", p.pixelLabel);
             formLayout->addRow("Mouse:", p.mouseLabel);
 
             _setWidget(layout);
 
-            p.pickObserver = ftk::Observer<std::optional<ftk::V2I> >::create(
-                mainWindow->getViewport()->observePick(),
-                [this](const std::optional<ftk::V2I>& value)
-                {
-                    std::string text = "-";
-                    if (value.has_value())
-                    {
-                        text = ftk::Format("{0}").arg(value.value());
-                    }
-                    _p->pixelLabel->setText(text);
-                });
-
-            p.colorSampleObserver = ftk::Observer<std::optional<ftk::Color4F> >::create(
-                mainWindow->getViewport()->observeColorSample(),
-                [this](const std::optional<ftk::Color4F>& value)
+            // The probe's sample, the same as the HUD: the picture's pixel
+            // as displayed, and as stored in the file.
+            p.pixelSampleObserver = ftk::Observer<std::optional<ui::PixelSample> >::create(
+                mainWindow->getViewport()->observePixelSample(),
+                [this](const std::optional<ui::PixelSample>& value)
                 {
                     FTK_P();
-                    p.colorSwatch->setColor(
-                        value.has_value() ? value.value() : ftk::Color4F());
+                    ftk::Color4F swatch;
                     std::string text = "-";
+                    std::string fileText = "-";
+                    std::string pixelText = "-";
                     if (value.has_value())
                     {
-                        text = ftk::Format("{0} {1} {2} {3}").
-                            arg(value.value().r, 2).
-                            arg(value.value().g, 2).
-                            arg(value.value().b, 2).
-                            arg(value.value().a, 2);
+                        if (value->display.has_value())
+                        {
+                            const ftk::Color4F& c = value->display.value();
+                            swatch = c;
+                            text = ftk::Format("{0} {1} {2} {3}").
+                                arg(c.r, 3).
+                                arg(c.g, 3).
+                                arg(c.b, 3).
+                                arg(c.a, 3);
+                        }
+                        if (value->file.has_value())
+                        {
+                            const ftk::Color4F& c = value->file.value();
+                            fileText = ftk::Format("{0} {1} {2} {3}").
+                                arg(c.r, 4).
+                                arg(c.g, 4).
+                                arg(c.b, 4).
+                                arg(c.a, 4);
+                        }
+                        pixelText = ftk::Format("{0}").arg(value->pixel);
+                        if (value->average > 0)
+                        {
+                            const int n = value->average * 2 + 1;
+                            pixelText += ftk::Format(" ({0}x{1})").arg(n).arg(n).str();
+                        }
                     }
+                    // Opaque: the swatch is what is on screen.
+                    swatch.a = 1.F;
+                    p.colorSwatch->setColor(swatch);
                     p.colorLabel->setText(text);
+                    p.fileLabel->setText(fileText);
+                    p.pixelLabel->setText(pixelText);
                 });
 
             p.settingsObserver = ftk::Observer<models::MouseSettings>::create(

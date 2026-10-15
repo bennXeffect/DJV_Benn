@@ -28,6 +28,19 @@ namespace djv
     namespace ui
     {
         //! Viewport.
+        //! A sample of the picture: the pixel, its color as displayed and as
+        //! stored in the file, averaged over a square of pixels around it.
+        struct DJV_UI_API_TYPE PixelSample
+        {
+            ftk::V2I pixel;
+            std::optional<ftk::Color4F> display;
+            std::optional<ftk::Color4F> file;
+            //! 0 for the pixel alone, 1 for 3x3, 2 for 5x5.
+            int average = 0;
+
+            bool operator == (const PixelSample&) const = default;
+        };
+
         class DJV_UI_API_TYPE Viewport : public tl::ui::Viewport
         {
             FTK_NON_COPYABLE(Viewport);
@@ -63,6 +76,10 @@ namespace djv
                 const std::shared_ptr<IWidget>& parent = nullptr);
 
             DJV_UI_API void setPlayer(const std::shared_ptr<tl::Player>&) override;
+
+            //! Observe the last sample of the picture the probe took: the
+            //! one color readout, for the HUD and the color picker tool.
+            DJV_UI_API std::shared_ptr<ftk::IObservable<std::optional<PixelSample> > > observePixelSample() const;
 
             //! Set whether the toast stands in for the status bar.
             DJV_UI_API void setToastActive(bool);
