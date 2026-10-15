@@ -55,6 +55,57 @@ namespace djv
             const std::chrono::seconds hintTimeout(3);
         }
 
+        namespace
+        {
+            //! The mouse's own motion while probing, gathered from SDL's
+            //! events as they come and taken by the next move or tick: the
+            //! raw counts, each through the speed curve, in the viewport's
+            //! pixels.
+            struct ProbeMotion
+            {
+                float dx = 0.F;
+                float dy = 0.F;
+                uint64_t timestamp = 0;
+                float speed = 0.F;
+                //! Pixels a count moves at the slowest and the fastest.
+                float minGain = 1.F;
+                float maxGain = 1.F;
+            };
+
+    #if defined(FTK_SDL3)
+            bool SDLCALL probeWatch(void* userdata, SDL_Event* event)
+            {
+                // Every motion of the mouse in relative mode: the raw counts,
+                // each through an exponential curve on how fast the mouse is
+                // going, so slow moves are fine and fast ones go far.
+                if (SDL_EVENT_MOUSE_MOTION == event->type)
+                {
+                    auto motion = static_cast<ProbeMotion*>(userdata);
+                    const float xrel = event->motion.xrel;
+                    const float yrel = event->motion.yrel;
+                    const float counts = std::sqrt(xrel * xrel + yrel * yrel);
+                    const uint64_t timestamp = event->motion.timestamp;
+                    float dt = .008F;
+                    if (motion->timestamp > 0 && timestamp > motion->timestamp)
+                    {
+                        dt = std::max((timestamp - motion->timestamp) / 1000000000.F, .001F);
+                    }
+                    motion->timestamp = timestamp;
+                    // Counts a second, smoothed so one quick event in a slow
+                    // move does not jump.
+                    motion->speed = motion->speed * .5F + (counts / dt) * .5F;
+                    const float gain = std::clamp(
+                        motion->minGain * std::exp(motion->speed / 900.F),
+                        motion->minGain,
+                        motion->maxGain);
+                    motion->dx += xrel * gain;
+                    motion->dy += yrel * gain;
+                }
+                return true;
+            }
+    #endif // FTK_SDL3
+        }
+
         struct Viewport::Private
         {
             std::weak_ptr<models::ViewportModel> viewportModel;
@@ -128,6 +179,7 @@ namespace djv
             SDL_Window* probeSDLWindow = nullptr;
             float probeSDLScale = 1.F;
 #endif // FTK_SDL3
+            ProbeMotion probeMotion;
             //! A context menu opened on a right click that did not drag,
             //! kept while it is open.
             std::shared_ptr<ftk::Menu> probeMenu;
@@ -756,29 +808,21 @@ namespace djv
                 break;
             case Private::MouseMode::Probe:
             {
-                // The movement since the last event, already slowed by the
-                // relative mouse mode set on the press. What tells a click
-                // for the context menu from a drag, and what moves the probe.
+#if defined(FTK_SDL3)
+                if (p.probeSDLWindow)
+                {
+                    // The motion gathered from the mouse's own counts.
+                    const ftk::V2F d(p.probeMotion.dx, p.probeMotion.dy);
+                    p.probeMotion.dx = 0.F;
+                    p.probeMotion.dy = 0.F;
+                    _probeMove(d);
+                    break;
+                }
+#endif // FTK_SDL3
+                // Without SDL's raw motion, the pointer's own.
                 const ftk::V2I d = event.pos - p.probeLastPos;
                 p.probeLastPos = event.pos;
-                p.mouse.probeTravel += std::abs(d.x) + std::abs(d.y);
-                if (p.mouse.probeTravel > 2)
-                {
-                    p.mouse.probeMoved = true;
-                }
-                p.probeVirtual.x += d.x;
-                p.probeVirtual.y += d.y;
-                const ftk::V2I target(
-                    static_cast<int>(std::lround(p.probeVirtual.x)),
-                    static_cast<int>(std::lround(p.probeVirtual.y)));
-                _probeAt(target);
-                if (p.probeWindowPos != target)
-                {
-                    // Held at the edge of the picture: coming back starts
-                    // from the edge, not from wherever the hand went past it.
-                    p.probeVirtual = ftk::V2F(p.probeWindowPos.x, p.probeWindowPos.y);
-                }
-                _probeUpdate();
+                _probeMove(ftk::V2F(d.x, d.y));
                 break;
             }
             case Private::MouseMode::Shuttle:
@@ -856,13 +900,19 @@ namespace djv
                     {
                         p.probeSDLScale = 1.F;
                     }
-                    const double scale = std::min(1.0, std::max(getZoom(), 0.0001) / 2.0);
-                    SDL_SetHint(
-                        SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE,
-                        std::to_string(scale).c_str());
+                    // The speed curve: slow moves at a fifth of a pixel of
+                    // the picture a count, for the pixel wanted; fast ones
+                    // up to two and a half of the viewport's pixels a count,
+                    // to cross the picture.
+                    const float zoom = static_cast<float>(std::max(getZoom(), 0.0001));
+                    p.probeMotion = ProbeMotion();
+                    p.probeMotion.minGain = 0.2F * zoom;
+                    p.probeMotion.maxGain = std::max(p.probeMotion.minGain, 2.5F);
+                    SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE);
                     if (SDL_SetWindowRelativeMouseMode(window, true))
                     {
                         p.probeSDLWindow = window;
+                        SDL_AddEventWatch(&probeWatch, &p.probeMotion);
                     }
                 }
 #endif // FTK_SDL3
@@ -935,8 +985,8 @@ namespace djv
 #if defined(FTK_SDL3)
                 if (p.probeSDLWindow)
                 {
+                    SDL_RemoveEventWatch(&probeWatch, &p.probeMotion);
                     SDL_SetWindowRelativeMouseMode(p.probeSDLWindow, false);
-                    SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE);
                     // The pointer comes back where the probe was, not where
                     // the hand would have taken it.
                     SDL_WarpMouseInWindow(
@@ -1678,6 +1728,7 @@ namespace djv
                 colorSpace = colorModel->observeResolvedInput()->get();
             }
             p.probeSwatch->setColor(display.has_value() ? display.value() : ftk::Color4F());
+            p.loupe->setAverageColor(display);
             p.probeLabel->setText(pick.has_value() ?
                 getPixelProbeText(pick.value(), file, display, getLumaWeights(colorSpace)) :
                 std::string("Outside the image"));
@@ -1719,8 +1770,42 @@ namespace djv
             // let go, so they settle on the pixel pointed at.
             if (p.probing)
             {
+#if defined(FTK_SDL3)
+                if (p.probeSDLWindow &&
+                    (p.probeMotion.dx != 0.F || p.probeMotion.dy != 0.F))
+                {
+                    const ftk::V2F d(p.probeMotion.dx, p.probeMotion.dy);
+                    p.probeMotion.dx = 0.F;
+                    p.probeMotion.dy = 0.F;
+                    _probeMove(d);
+                }
+#endif // FTK_SDL3
                 _probeUpdate();
             }
+        }
+
+        void Viewport::_probeMove(const ftk::V2F& d)
+        {
+            FTK_P();
+            // What tells a click for the context menu from a drag.
+            p.mouse.probeTravel += static_cast<int>(std::ceil(std::abs(d.x) + std::abs(d.y)));
+            if (p.mouse.probeTravel > 2)
+            {
+                p.mouse.probeMoved = true;
+            }
+            p.probeVirtual.x += d.x;
+            p.probeVirtual.y += d.y;
+            const ftk::V2I target(
+                static_cast<int>(std::lround(p.probeVirtual.x)),
+                static_cast<int>(std::lround(p.probeVirtual.y)));
+            _probeAt(target);
+            if (p.probeWindowPos != target)
+            {
+                // Held at the edge of the picture: coming back starts from
+                // the edge, not from wherever the hand went past it.
+                p.probeVirtual = ftk::V2F(p.probeWindowPos.x, p.probeWindowPos.y);
+            }
+            _probeUpdate();
         }
 
         void Viewport::_probeAt(const ftk::V2I& windowPos)

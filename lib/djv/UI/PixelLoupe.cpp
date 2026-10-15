@@ -21,6 +21,7 @@ namespace djv
             std::shared_ptr<ViewportBinding> binding;
             ftk::V2I target;
             int average = 0;
+            std::optional<ftk::Color4F> averageColor;
 
             struct SizeData
             {
@@ -138,6 +139,15 @@ namespace djv
             if (tmp == p.average)
                 return;
             p.average = tmp;
+            setDrawUpdate();
+        }
+
+        void PixelLoupe::setAverageColor(const std::optional<ftk::Color4F>& value)
+        {
+            FTK_P();
+            if (value == p.averageColor)
+                return;
+            p.averageColor = value;
             setDrawUpdate();
         }
 
@@ -284,7 +294,22 @@ namespace djv
             outline(ftk::margin(box, 1), 3, dark);
             outline(box, 1, light);
 
-            const int gap = half + 3;
+            // The average, as a ring of its color around the pixels it is
+            // taken from: next to them to compare, over none of them.
+            int ringOut = 0;
+            if (p.average > 0 && p.averageColor.has_value())
+            {
+                const int ring = 7;
+                const ftk::Box2I ringBox = ftk::margin(box, 2 + ring);
+                ftk::Color4F color = p.averageColor.value();
+                color.a = 1.F;
+                outline(ftk::margin(box, 2), ring, color);
+                outline(ftk::margin(ringBox, 1), 2, dark);
+                outline(ringBox, 1, light);
+                ringOut = ring + 3;
+            }
+
+            const int gap = half + 3 + ringOut;
             std::vector<ftk::Box2I> darkLines =
             {
                 ftk::Box2I(c.x - 1, v.min.y, 3, c.y - gap - v.min.y),

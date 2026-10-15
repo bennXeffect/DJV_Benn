@@ -134,6 +134,7 @@ namespace djv
             void _probeUpdate();
             void _loupeGeometry();
             void _probeAt(const ftk::V2I& windowPos);
+            void _probeMove(const ftk::V2F&);
 
             FTK_PRIVATE();
         };

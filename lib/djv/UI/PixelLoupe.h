@@ -75,6 +75,9 @@ namespace djv
             //! 1 three by three, 2 five by five.
             DJV_UI_API void setAverage(int);
 
+            //! Set the averaged color to show around the pixels averaged.
+            DJV_UI_API void setAverageColor(const std::optional<ftk::Color4F>&);
+
             //! Get the displayed color, averaged over the pixels the average
             //! takes in; read back from what was last drawn.
             DJV_UI_API std::optional<ftk::Color4F> getDisplayColor();
