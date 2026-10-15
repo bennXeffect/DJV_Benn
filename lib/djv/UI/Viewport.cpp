@@ -183,6 +183,8 @@ namespace djv
             float probeSDLScale = 1.F;
 #endif // FTK_SDL3
             ProbeMotion probeMotion;
+            //! The same for the frame shuttle, without the speed curve.
+            ProbeMotion shuttleMotion;
             //! A context menu opened on a right click that did not drag,
             //! kept while it is open.
             std::shared_ptr<ftk::Menu> probeMenu;
@@ -856,95 +858,21 @@ namespace djv
             }
             case Private::MouseMode::Shuttle:
             {
-                // The pointer's travel since the last move. A jump of more
-                // than half the viewport is not the hand's: it is the
-                // pointer brought round to the other side below, or a move
-                // from before that, still waiting to be read.
-                const ftk::Box2I& g = getGeometry();
-                const ftk::V2I d = event.pos - p.mouse.shuttleLast;
-                if (std::abs(d.x) > g.w() / 2 || std::abs(d.y) > g.h() / 2)
+#if defined(FTK_SDL3)
+                if (p.mouse.shuttleSDLWindow)
                 {
+                    // The motion gathered from the mouse's own counts.
+                    const float dx = p.shuttleMotion.dx;
+                    p.shuttleMotion.dx = 0.F;
+                    p.shuttleMotion.dy = 0.F;
+                    _shuttleMove(dx * p.mouse.shuttleSDLScale);
                     break;
                 }
+#endif // FTK_SDL3
+                // Without SDL's relative motion, the pointer's own.
+                const int dx = event.pos.x - p.mouse.shuttleLast.x;
                 p.mouse.shuttleLast = event.pos;
-
-                // Ten of the viewport's pixels a frame; with Shift held,
-                // twenty, for the fine adjustments, as in Blender. Read on
-                // every move, so it can be pressed and let go during the
-                // drag without a jump. A binding that takes Shift itself
-                // has no fine speed.
-                bool fine = false;
-                if (!(static_cast<int>(p.frameShuttleBinding.modifier) &
-                    static_cast<int>(ftk::KeyModifier::Shift)))
-                {
-#if defined(FTK_SDL3)
-                    fine = SDL_GetModState() & SDL_KMOD_SHIFT;
-#else // FTK_SDL3
-                    fine = event.modifiers & static_cast<int>(ftk::KeyModifier::Shift);
-#endif // FTK_SDL3
-                }
-                p.mouse.shuttleFrames += d.x * (fine ? .05 : .1) * p.frameShuttleScale;
-
-                // The mode is taken on the press whether or not there was a
-                // player to read a position from, so the two can disagree
-                // and the shuttle has nothing to move from.
-                auto player = getPlayer();
-                const int64_t offset = std::llround(p.mouse.shuttleFrames);
-                if (player && p.mouse.shuttleStart.has_value() && offset != p.mouse.shuttleOffset)
-                {
-                    p.mouse.shuttleOffset = offset;
-                    // Round the time range, as many times as the drag goes.
-                    const OTIO_NS::TimeRange& timeRange = player->getTimeRange();
-                    const double rate = timeRange.duration().rate();
-                    const double start = timeRange.start_time().rescaled_to(rate).value();
-                    const double duration = std::round(timeRange.duration().value());
-                    if (duration > 0.0)
-                    {
-                        double f = std::fmod(
-                            p.mouse.shuttleStart->rescaled_to(rate).value() - start + offset,
-                            duration);
-                        if (f < 0.0)
-                        {
-                            f += duration;
-                        }
-                        player->seek(OTIO_NS::RationalTime(start + f, rate));
-                    }
-                }
-
-#if defined(FTK_SDL3)
-                // No end to the drag: the pointer that reaches a side of the
-                // viewport comes back from the other, as in Blender, so the
-                // edge of the window, or of the screen, does not stop it.
-                const int margin = 2;
-                if (p.mouse.shuttleSDLWindow && g.w() > margin * 8 && g.h() > margin * 8)
-                {
-                    ftk::V2I warp = event.pos;
-                    if (event.pos.x <= g.min.x + margin)
-                    {
-                        warp.x = g.max.x - margin - 1;
-                    }
-                    else if (event.pos.x >= g.max.x - margin)
-                    {
-                        warp.x = g.min.x + margin + 1;
-                    }
-                    if (event.pos.y <= g.min.y + margin)
-                    {
-                        warp.y = g.max.y - margin - 1;
-                    }
-                    else if (event.pos.y >= g.max.y - margin)
-                    {
-                        warp.y = g.min.y + margin + 1;
-                    }
-                    if (warp != event.pos)
-                    {
-                        p.mouse.shuttleLast = warp;
-                        SDL_WarpMouseInWindow(
-                            p.mouse.shuttleSDLWindow,
-                            warp.x / p.mouse.shuttleSDLScale,
-                            warp.y / p.mouse.shuttleSDLScale);
-                    }
-                }
-#endif // FTK_SDL3
+                _shuttleMove(dx);
                 break;
             }
             default: break;
@@ -1074,16 +1002,37 @@ namespace djv
                 p.mouse.mode = Private::MouseMode::Shuttle;
                 p.mouse.shuttleLast = event.pos;
 #if defined(FTK_SDL3)
+                // The mouse in relative mode while the button is held, as
+                // for the probe: its motion is counted however far it goes,
+                // where the pointer's stops at the edge of the screen. The
+                // pointer stays in sight, free in the window, and the
+                // motion has the system's pointer speed, so the shuttle goes
+                // as far as the pointer would.
                 if (SDL_Window* window = SDL_GetMouseFocus())
                 {
-                    p.mouse.shuttleSDLWindow = window;
-                    if (auto ftkWindow = getWindow())
+                    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_CURSOR_VISIBLE, "1");
+                    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER, "0");
+                    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "1");
+                    // Gains of one: the counts as they come.
+                    p.shuttleMotion = ProbeMotion();
+                    if (SDL_SetWindowRelativeMouseMode(window, true))
                     {
-                        p.mouse.shuttleSDLScale = ftkWindow->getContentScale();
+                        p.mouse.shuttleSDLWindow = window;
+                        if (auto ftkWindow = getWindow())
+                        {
+                            p.mouse.shuttleSDLScale = ftkWindow->getContentScale();
+                        }
+                        if (!(p.mouse.shuttleSDLScale > 0.F))
+                        {
+                            p.mouse.shuttleSDLScale = 1.F;
+                        }
+                        SDL_AddEventWatch(&probeWatch, &p.shuttleMotion);
                     }
-                    if (!(p.mouse.shuttleSDLScale > 0.F))
+                    else
                     {
-                        p.mouse.shuttleSDLScale = 1.F;
+                        SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_CURSOR_VISIBLE);
+                        SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER);
+                        SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE);
                     }
                 }
 #endif // FTK_SDL3
@@ -1135,6 +1084,10 @@ namespace djv
                     }
                 }
                 return;
+            }
+            if (Private::MouseMode::Shuttle == p.mouse.mode)
+            {
+                _shuttleEnd();
             }
             if (Private::MouseMode::Draw == p.mouse.mode)
             {
@@ -1936,6 +1889,136 @@ namespace djv
 #endif // FTK_SDL3
                 _probeUpdate();
             }
+#if defined(FTK_SDL3)
+            if (Private::MouseMode::Shuttle == p.mouse.mode &&
+                p.mouse.shuttleSDLWindow &&
+                (p.shuttleMotion.dx != 0.F || p.shuttleMotion.dy != 0.F))
+            {
+                const float dx = p.shuttleMotion.dx;
+                p.shuttleMotion.dx = 0.F;
+                p.shuttleMotion.dy = 0.F;
+                _shuttleMove(dx * p.mouse.shuttleSDLScale);
+            }
+#endif // FTK_SDL3
+        }
+
+        void Viewport::_shuttleMove(float dx)
+        {
+            FTK_P();
+            // A frame for every 5.7 of the viewport's pixels; with Shift
+            // held, twenty, for the fine adjustments, as in Blender. Read on
+            // every move, so it can be pressed and let go during the drag
+            // without a jump. A binding that takes Shift itself has no fine
+            // speed.
+            bool fine = false;
+            if (!(static_cast<int>(p.frameShuttleBinding.modifier) &
+                static_cast<int>(ftk::KeyModifier::Shift)))
+            {
+#if defined(FTK_SDL3)
+                fine = SDL_GetModState() & SDL_KMOD_SHIFT;
+#endif // FTK_SDL3
+            }
+            p.mouse.shuttleFrames += dx * (fine ? .05 : .175) * p.frameShuttleScale;
+
+            // The mode is taken on the press whether or not there was a
+            // player to read a position from, so the two can disagree and
+            // the shuttle has nothing to move from.
+            auto player = getPlayer();
+            const int64_t offset = std::llround(p.mouse.shuttleFrames);
+            if (player && p.mouse.shuttleStart.has_value() && offset != p.mouse.shuttleOffset)
+            {
+                p.mouse.shuttleOffset = offset;
+                // Round the time range, as many times as the drag goes.
+                const OTIO_NS::TimeRange& timeRange = player->getTimeRange();
+                const double rate = timeRange.duration().rate();
+                const double start = timeRange.start_time().rescaled_to(rate).value();
+                const double duration = std::round(timeRange.duration().value());
+                if (duration > 0.0)
+                {
+                    double f = std::fmod(
+                        p.mouse.shuttleStart->rescaled_to(rate).value() - start + offset,
+                        duration);
+                    if (f < 0.0)
+                    {
+                        f += duration;
+                    }
+                    player->seek(OTIO_NS::RationalTime(start + f, rate));
+                }
+            }
+
+#if defined(FTK_SDL3)
+            // The pointer that reaches a side of the viewport comes back
+            // from the other, as in Blender. Moving it does not count as
+            // motion: that is the mouse's own.
+            if (SDL_Window* window = p.mouse.shuttleSDLWindow)
+            {
+                float gx = 0.F;
+                float gy = 0.F;
+                SDL_GetGlobalMouseState(&gx, &gy);
+                int wx = 0;
+                int wy = 0;
+                SDL_GetWindowPosition(window, &wx, &wy);
+                const float scale = p.mouse.shuttleSDLScale;
+                ftk::V2I pos(
+                    static_cast<int>(std::lround((gx - wx) * scale)),
+                    static_cast<int>(std::lround((gy - wy) * scale)));
+                const ftk::Box2I& g = getGeometry();
+                const int margin = 2;
+                if (g.w() > margin * 8 && g.h() > margin * 8)
+                {
+                    ftk::V2I warp = pos;
+                    if (pos.x <= g.min.x + margin)
+                    {
+                        warp.x = g.max.x - margin - 1;
+                    }
+                    else if (pos.x >= g.max.x - margin)
+                    {
+                        warp.x = g.min.x + margin + 1;
+                    }
+                    if (pos.y <= g.min.y + margin)
+                    {
+                        warp.y = g.max.y - margin - 1;
+                    }
+                    else if (pos.y >= g.max.y - margin)
+                    {
+                        warp.y = g.min.y + margin + 1;
+                    }
+                    if (warp != pos)
+                    {
+                        SDL_WarpMouseGlobal(wx + warp.x / scale, wy + warp.y / scale);
+                        pos = warp;
+                    }
+                }
+                // SDL's own idea of where the pointer is, which it puts the
+                // pointer back to when relative mode ends: kept on it. In
+                // relative mode this moves nothing.
+                SDL_WarpMouseInWindow(window, pos.x / scale, pos.y / scale);
+            }
+#endif // FTK_SDL3
+        }
+
+        void Viewport::_shuttleEnd()
+        {
+            FTK_P();
+#if defined(FTK_SDL3)
+            if (SDL_Window* window = p.mouse.shuttleSDLWindow)
+            {
+                SDL_RemoveEventWatch(&probeWatch, &p.shuttleMotion);
+                // The pointer stays where it is.
+                float gx = 0.F;
+                float gy = 0.F;
+                SDL_GetGlobalMouseState(&gx, &gy);
+                int wx = 0;
+                int wy = 0;
+                SDL_GetWindowPosition(window, &wx, &wy);
+                SDL_WarpMouseInWindow(window, gx - wx, gy - wy);
+                SDL_SetWindowRelativeMouseMode(window, false);
+                SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_CURSOR_VISIBLE);
+                SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER);
+                SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE);
+                p.mouse.shuttleSDLWindow = nullptr;
+            }
+#endif // FTK_SDL3
         }
 
         void Viewport::_probeMove(const ftk::V2F& d)
