@@ -233,6 +233,17 @@ namespace djv
                 bool probeRightButton = false;
                 std::optional<OTIO_NS::RationalTime> shuttleStart;
                 tl::Playback shuttlePlayback = tl::Playback::Stop;
+                //! The frames the shuttle has moved, from the pointer's
+                //! travel, and where the pointer was last.
+                double shuttleFrames = 0.0;
+                int64_t shuttleOffset = 0;
+                ftk::V2I shuttleLast;
+#if defined(FTK_SDL3)
+                //! The window the pointer is brought round in, and its
+                //! scale from SDL's coordinates to ours.
+                SDL_Window* shuttleSDLWindow = nullptr;
+                float shuttleSDLScale = 1.F;
+#endif // FTK_SDL3
             };
             MouseData mouse;
 
@@ -844,30 +855,98 @@ namespace djv
                 break;
             }
             case Private::MouseMode::Shuttle:
-                if (auto player = getPlayer())
+            {
+                // The pointer's travel since the last move. A jump of more
+                // than half the viewport is not the hand's: it is the
+                // pointer brought round to the other side below, or a move
+                // from before that, still waiting to be read.
+                const ftk::Box2I& g = getGeometry();
+                const ftk::V2I d = event.pos - p.mouse.shuttleLast;
+                if (std::abs(d.x) > g.w() / 2 || std::abs(d.y) > g.h() / 2)
                 {
-                    // The mode is taken on the press whether or not there was
-                    // a player to read a position from, so the two can
-                    // disagree and the shuttle has nothing to move from.
-                    if (p.mouse.shuttleStart.has_value())
+                    break;
+                }
+                p.mouse.shuttleLast = event.pos;
+
+                // Ten of the viewport's pixels a frame; with Shift held,
+                // twenty, for the fine adjustments, as in Blender. Read on
+                // every move, so it can be pressed and let go during the
+                // drag without a jump. A binding that takes Shift itself
+                // has no fine speed.
+                bool fine = false;
+                if (!(static_cast<int>(p.frameShuttleBinding.modifier) &
+                    static_cast<int>(ftk::KeyModifier::Shift)))
+                {
+#if defined(FTK_SDL3)
+                    fine = SDL_GetModState() & SDL_KMOD_SHIFT;
+#else // FTK_SDL3
+                    fine = event.modifiers & static_cast<int>(ftk::KeyModifier::Shift);
+#endif // FTK_SDL3
+                }
+                p.mouse.shuttleFrames += d.x * (fine ? .05 : .1) * p.frameShuttleScale;
+
+                // The mode is taken on the press whether or not there was a
+                // player to read a position from, so the two can disagree
+                // and the shuttle has nothing to move from.
+                auto player = getPlayer();
+                const int64_t offset = std::llround(p.mouse.shuttleFrames);
+                if (player && p.mouse.shuttleStart.has_value() && offset != p.mouse.shuttleOffset)
+                {
+                    p.mouse.shuttleOffset = offset;
+                    // Round the time range, as many times as the drag goes.
+                    const OTIO_NS::TimeRange& timeRange = player->getTimeRange();
+                    const double rate = timeRange.duration().rate();
+                    const double start = timeRange.start_time().rescaled_to(rate).value();
+                    const double duration = std::round(timeRange.duration().value());
+                    if (duration > 0.0)
                     {
-                        const OTIO_NS::RationalTime offset = OTIO_NS::RationalTime(
-                            (event.pos.x - _getMousePressPos().x) * .05F * p.frameShuttleScale,
-                            p.mouse.shuttleStart->rate()).round();
-                        const OTIO_NS::TimeRange& timeRange = player->getTimeRange();
-                        OTIO_NS::RationalTime t = *p.mouse.shuttleStart + offset;
-                        if (t < timeRange.start_time())
+                        double f = std::fmod(
+                            p.mouse.shuttleStart->rescaled_to(rate).value() - start + offset,
+                            duration);
+                        if (f < 0.0)
                         {
-                            t = timeRange.end_time_exclusive() - (timeRange.start_time() - t);
+                            f += duration;
                         }
-                        else if (t > timeRange.end_time_exclusive())
-                        {
-                            t = timeRange.start_time() + (t - timeRange.end_time_exclusive());
-                        }
-                        player->seek(t);
+                        player->seek(OTIO_NS::RationalTime(start + f, rate));
                     }
                 }
+
+#if defined(FTK_SDL3)
+                // No end to the drag: the pointer that reaches a side of the
+                // viewport comes back from the other, as in Blender, so the
+                // edge of the window, or of the screen, does not stop it.
+                const int margin = 2;
+                if (p.mouse.shuttleSDLWindow && g.w() > margin * 8 && g.h() > margin * 8)
+                {
+                    ftk::V2I warp = event.pos;
+                    if (event.pos.x <= g.min.x + margin)
+                    {
+                        warp.x = g.max.x - margin - 1;
+                    }
+                    else if (event.pos.x >= g.max.x - margin)
+                    {
+                        warp.x = g.min.x + margin + 1;
+                    }
+                    if (event.pos.y <= g.min.y + margin)
+                    {
+                        warp.y = g.max.y - margin - 1;
+                    }
+                    else if (event.pos.y >= g.max.y - margin)
+                    {
+                        warp.y = g.min.y + margin + 1;
+                    }
+                    if (warp != event.pos)
+                    {
+                        p.mouse.shuttleLast = warp;
+                        SDL_WarpMouseInWindow(
+                            p.mouse.shuttleSDLWindow,
+                            warp.x / p.mouse.shuttleSDLScale,
+                            warp.y / p.mouse.shuttleSDLScale);
+                    }
+                }
+#endif // FTK_SDL3
                 break;
+            }
             default: break;
             }
         }
@@ -978,8 +1057,14 @@ namespace djv
                 return;
             }
 
+            // Shift with a binding that has no modifier of its own is the
+            // fine shuttle, from the start.
+            const bool fineShuttle =
+                ftk::KeyModifier::None == p.frameShuttleBinding.modifier &&
+                static_cast<int>(ftk::KeyModifier::Shift) == event.modifiers &&
+                !event.accept;
             if (p.frameShuttleBinding.button == event.button &&
-                ftk::checkKeyModifier(p.frameShuttleBinding.modifier, event.modifiers))
+                (ftk::checkKeyModifier(p.frameShuttleBinding.modifier, event.modifiers) || fineShuttle))
             {
                 // The base class only claims the buttons bound to its own
                 // actions, so claim ours here; an unbound button is left
@@ -987,6 +1072,21 @@ namespace djv
                 event.accept = true;
                 takeKeyFocus();
                 p.mouse.mode = Private::MouseMode::Shuttle;
+                p.mouse.shuttleLast = event.pos;
+#if defined(FTK_SDL3)
+                if (SDL_Window* window = SDL_GetMouseFocus())
+                {
+                    p.mouse.shuttleSDLWindow = window;
+                    if (auto ftkWindow = getWindow())
+                    {
+                        p.mouse.shuttleSDLScale = ftkWindow->getContentScale();
+                    }
+                    if (!(p.mouse.shuttleSDLScale > 0.F))
+                    {
+                        p.mouse.shuttleSDLScale = 1.F;
+                    }
+                }
+#endif // FTK_SDL3
                 if (auto player = getPlayer())
                 {
                     p.mouse.shuttlePlayback = player->getPlayback();
