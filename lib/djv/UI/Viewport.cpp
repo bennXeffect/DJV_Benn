@@ -3,6 +3,7 @@
 
 #include <djv/UI/Viewport.h>
 
+#include <djv/UI/PixelLoupe.h>
 #include <djv/UI/PixelProbe.h>
 #include <djv/UI/ViewportBinding.h>
 
@@ -105,6 +106,12 @@ namespace djv
             std::shared_ptr<ftk::ColorSwatch> probeSwatch;
             std::shared_ptr<ftk::Label> probeLabel;
             bool probing = false;
+            //! The loupe that follows the pointer while probing, how far
+            //! around the pixel the values are averaged (0, 1 or 2, a
+            //! square of 1, 3 or 5 pixels), and where the pointer is.
+            std::shared_ptr<PixelLoupe> loupe;
+            int probeAverage = 0;
+            ftk::V2I probeWindowPos;
             //! A context menu opened on a right click that did not drag,
             //! kept while it is open.
             std::shared_ptr<ftk::Menu> probeMenu;
@@ -310,6 +317,14 @@ namespace djv
                 context, ftk::Orientation::Horizontal, probeRow);
             spacer->setStretch(ftk::Stretch::Expanding);
             p.probeLayout->setVisible(false);
+
+            p.loupe = PixelLoupe::create(
+                context,
+                filesModel,
+                colorModel,
+                viewportModel,
+                shared_from_this());
+            p.loupe->setVisible(false);
 
             auto bottomRowLayout = ftk::HorizontalLayout::create(context, bottomLayout);
             bottomRowLayout->setSpacingRole(ftk::SizeRole::SpacingSmall);
@@ -566,6 +581,7 @@ namespace djv
             {
                 p.path = player->getPath();
                 p.timeRange = player->getTimeRange();
+                p.loupe->setPlayer(player);
 
                 // The information describes the media reference being read, so
                 // it is refreshed when the key changes. The observer also
@@ -644,6 +660,7 @@ namespace djv
                 p.path = ftk::Path();
                 p.ioInfo = tl::IOInfo();
                 p.timeRange.reset();
+                p.loupe->setPlayer(nullptr);
                 setInputEnabled(false);
                 p.mediaReferenceKeyObserver.reset();
                 p.currentTime.reset();
@@ -702,6 +719,10 @@ namespace djv
             tl::ui::Viewport::setGeometry(value);
             FTK_P();
             p.hudLayout->setGeometry(value);
+            if (p.probing)
+            {
+                _loupeGeometry();
+            }
         }
 
         void Viewport::mouseMoveEvent(ftk::MouseMoveEvent& event)
@@ -724,6 +745,9 @@ namespace djv
                     p.mouse.probeMoved = true;
                 }
                 sample(toViewportPos(event.pos));
+                p.probeWindowPos = event.pos;
+                p.loupe->setTarget(toRenderPos(toViewportPos(event.pos)));
+                _loupeGeometry();
                 _probeUpdate();
                 break;
             }
@@ -784,6 +808,13 @@ namespace djv
                 p.probing = true;
                 sample(toViewportPos(event.pos));
                 p.probeLayout->setVisible(true);
+                // The pixel alone to start with; the wheel widens it.
+                p.probeAverage = 0;
+                p.probeWindowPos = event.pos;
+                p.loupe->setAverage(p.probeAverage);
+                p.loupe->setTarget(toRenderPos(toViewportPos(event.pos)));
+                p.loupe->setVisible(true);
+                _loupeGeometry();
                 _probeUpdate();
                 return;
             }
@@ -842,6 +873,7 @@ namespace djv
                 p.mouse.mode = Private::MouseMode::None;
                 p.probing = false;
                 p.probeLayout->setVisible(false);
+                p.loupe->setVisible(false);
                 if (!p.mouse.probeMoved && !event.cancel)
                 {
                     const auto& callback = getContextMenuCallback();
@@ -1522,7 +1554,15 @@ namespace djv
                 return;
             }
             const auto& pick = observePick()->get();
-            const auto& display = observeColorSample()->get();
+            // What is displayed, from the loupe, which draws the picture at
+            // the size of the file: read from the viewport, a pixel on
+            // screen is several of the file's blended when zoomed out.
+            std::optional<ftk::Color4F> display = p.loupe->getDisplayColor();
+            if (!display.has_value())
+            {
+                display = observeColorSample()->get();
+            }
+            // The file's values, averaged over the same pixels.
             std::optional<ftk::Color4F> file;
             if (pick.has_value() && !p.videoFrames.empty())
             {
@@ -1530,7 +1570,32 @@ namespace djv
                 {
                     if (layer.image)
                     {
-                        file = readPixel(layer.image, pick.value());
+                        ftk::Color4F sum(0.F, 0.F, 0.F, 0.F);
+                        int count = 0;
+                        for (int y = -p.probeAverage; y <= p.probeAverage; ++y)
+                        {
+                            for (int x = -p.probeAverage; x <= p.probeAverage; ++x)
+                            {
+                                if (const auto c = readPixel(
+                                    layer.image,
+                                    ftk::V2I(pick->x + x, pick->y + y)))
+                                {
+                                    sum.r += c->r;
+                                    sum.g += c->g;
+                                    sum.b += c->b;
+                                    sum.a += c->a;
+                                    ++count;
+                                }
+                            }
+                        }
+                        if (count > 0)
+                        {
+                            file = ftk::Color4F(
+                                sum.r / count,
+                                sum.g / count,
+                                sum.b / count,
+                                sum.a / count);
+                        }
                         break;
                     }
                 }
@@ -1544,6 +1609,61 @@ namespace djv
             p.probeLabel->setText(pick.has_value() ?
                 getPixelProbeText(pick.value(), file, display, getLumaWeights(colorSpace)) :
                 std::string("Outside the image"));
+        }
+
+        void Viewport::scrollEvent(ftk::ScrollEvent& event)
+        {
+            FTK_P();
+            if (p.probing)
+            {
+                // While probing the wheel is the size of the average rather
+                // than the zoom: the pixel alone, three by three, five by
+                // five.
+                event.accept = true;
+                if (event.value.y > 0.F)
+                {
+                    p.probeAverage = std::min(p.probeAverage + 1, 2);
+                }
+                else if (event.value.y < 0.F)
+                {
+                    p.probeAverage = std::max(p.probeAverage - 1, 0);
+                }
+                p.loupe->setAverage(p.probeAverage);
+                _probeUpdate();
+                return;
+            }
+            tl::ui::Viewport::scrollEvent(event);
+        }
+
+        void Viewport::tickEvent(
+            bool parentsVisible,
+            bool parentsEnabled,
+            const ftk::TickEvent& event)
+        {
+            tl::ui::Viewport::tickEvent(parentsVisible, parentsEnabled, event);
+            FTK_P();
+            // The loupe's values are read back from what it last drew, which
+            // is a frame behind a move; read them again until the button is
+            // let go, so they settle on the pixel pointed at.
+            if (p.probing)
+            {
+                _probeUpdate();
+            }
+        }
+
+        void Viewport::_loupeGeometry()
+        {
+            FTK_P();
+            // Centered on the pointer: the middle of the loupe's picture is
+            // the pixel under it, and the note sits above.
+            const ftk::Size2I size = p.loupe->getLoupeSize();
+            const int square = size.w;
+            const int note = size.h - square;
+            p.loupe->setGeometry(ftk::Box2I(
+                p.probeWindowPos.x - square / 2,
+                p.probeWindowPos.y - square / 2 - note,
+                size.w,
+                size.h));
         }
 
         void Viewport::_hudLayout()

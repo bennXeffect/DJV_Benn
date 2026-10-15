@@ -85,6 +85,8 @@ namespace djv
             DJV_UI_API void mouseReleaseEvent(ftk::MouseClickEvent&) override;
             DJV_UI_API void mouseEnterEvent(ftk::MouseEnterEvent&) override;
             DJV_UI_API void mouseLeaveEvent() override;
+            DJV_UI_API void scrollEvent(ftk::ScrollEvent&) override;
+            DJV_UI_API void tickEvent(bool, bool, const ftk::TickEvent&) override;
 
         private:
             //! Where a position in the viewport falls in the sources.
@@ -130,6 +132,7 @@ namespace djv
             void _hudUpdate();
             void _hudLayout();
             void _probeUpdate();
+            void _loupeGeometry();
 
             FTK_PRIVATE();
         };

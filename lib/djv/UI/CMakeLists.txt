@@ -19,6 +19,7 @@ set(HEADERS
     ExportWidgets.h
     InfoWidget.h
     MagnifyWidget.h
+    PixelLoupe.h
     PixelProbe.h
     ScopesWidget.h
     ViewWidgets.h
@@ -49,6 +50,7 @@ set(SOURCE
     ExportWidgets.cpp
     InfoWidget.cpp
     MagnifyWidget.cpp
+    PixelLoupe.cpp
     PixelProbe.cpp
     ScopesWidget.cpp
     ViewWidgets.cpp
