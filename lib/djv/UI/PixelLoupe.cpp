@@ -294,22 +294,21 @@ namespace djv
             outline(ftk::margin(box, 1), 3, dark);
             outline(box, 1, light);
 
-            // The average, as a ring of its color around the pixels it is
-            // taken from: next to them to compare, over none of them.
-            int ringOut = 0;
+            // The average, as a square of its color hung from the box's
+            // lower right corner: next to the pixels it is taken from to
+            // compare, over none of them, and clear of the crosshair. As big
+            // as the largest box, five pixels across.
             if (p.average > 0 && p.averageColor.has_value())
             {
-                const int ring = 7;
-                const ftk::Box2I ringBox = ftk::margin(box, 2 + ring);
+                const int size = 5 * zoom;
                 ftk::Color4F color = p.averageColor.value();
                 color.a = 1.F;
-                outline(ftk::margin(box, 2), ring, color);
-                outline(ftk::margin(ringBox, 1), 2, dark);
-                outline(ringBox, 1, light);
-                ringOut = ring + 3;
+                event.render->drawRect(
+                    ftk::Box2I(box.max.x + 2, box.max.y + 2, size, size),
+                    color);
             }
 
-            const int gap = half + 3 + ringOut;
+            const int gap = half + 3;
             std::vector<ftk::Box2I> darkLines =
             {
                 ftk::Box2I(c.x - 1, v.min.y, 3, c.y - gap - v.min.y),

@@ -900,14 +900,14 @@ namespace djv
                     {
                         p.probeSDLScale = 1.F;
                     }
-                    // The speed curve: slow moves at a fifth of a pixel of
+                    // The speed curve: slow moves at a tenth of a pixel of
                     // the picture a count, for the pixel wanted; fast ones
-                    // up to two and a half of the viewport's pixels a count,
-                    // to cross the picture.
+                    // up to one and a quarter of the viewport's pixels a
+                    // count, to cross the picture.
                     const float zoom = static_cast<float>(std::max(getZoom(), 0.0001));
                     p.probeMotion = ProbeMotion();
-                    p.probeMotion.minGain = 0.2F * zoom;
-                    p.probeMotion.maxGain = std::max(p.probeMotion.minGain, 2.5F);
+                    p.probeMotion.minGain = 0.1F * zoom;
+                    p.probeMotion.maxGain = std::max(p.probeMotion.minGain, 1.25F);
                     SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE);
                     if (SDL_SetWindowRelativeMouseMode(window, true))
                     {
