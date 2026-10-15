@@ -1805,6 +1805,20 @@ namespace djv
                 // the edge, not from wherever the hand went past it.
                 p.probeVirtual = ftk::V2F(p.probeWindowPos.x, p.probeWindowPos.y);
             }
+#if defined(FTK_SDL3)
+            // SDL's own idea of where the hidden pointer is goes at the
+            // mouse's speed, not the probe's, and the wheel goes to whatever
+            // is under it: over the tools, the wheel scrolled them instead of
+            // changing the average. Kept on the probe; in relative mode this
+            // moves no pointer and sends no motion.
+            if (p.probeSDLWindow)
+            {
+                SDL_WarpMouseInWindow(
+                    p.probeSDLWindow,
+                    p.probeWindowPos.x / p.probeSDLScale,
+                    p.probeWindowPos.y / p.probeSDLScale);
+            }
+#endif // FTK_SDL3
             _probeUpdate();
         }
 
