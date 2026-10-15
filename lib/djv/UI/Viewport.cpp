@@ -3,7 +3,6 @@
 
 #include <djv/UI/Viewport.h>
 
-#include <djv/UI/CursorWarp.h>
 #include <djv/UI/PixelLoupe.h>
 #include <djv/UI/PixelProbe.h>
 #include <djv/UI/ViewportBinding.h>
@@ -30,6 +29,10 @@
 #include <ftk/Core/Format.h>
 #include <ftk/Core/String.h>
 #include <ftk/Core/Timer.h>
+
+#if defined(FTK_SDL3)
+#include <SDL3/SDL.h>
+#endif // FTK_SDL3
 
 #include <algorithm>
 
@@ -119,6 +122,12 @@ namespace djv
             ftk::V2F probeVirtual;
             //! Where the last event left the pointer.
             ftk::V2I probeLastPos;
+#if defined(FTK_SDL3)
+            //! The window whose mouse is in relative mode while probing, and
+            //! how its mouse positions scale to the ones the events carry.
+            SDL_Window* probeSDLWindow = nullptr;
+            float probeSDLScale = 1.F;
+#endif // FTK_SDL3
             //! A context menu opened on a right click that did not drag,
             //! kept while it is open.
             std::shared_ptr<ftk::Menu> probeMenu;
@@ -747,21 +756,18 @@ namespace djv
                 break;
             case Private::MouseMode::Probe:
             {
-                // The hand's movement, before it is slowed: what tells a
-                // click for the context menu from a drag.
+                // The movement since the last event, already slowed by the
+                // relative mouse mode set on the press. What tells a click
+                // for the context menu from a drag, and what moves the probe.
                 const ftk::V2I d = event.pos - p.probeLastPos;
+                p.probeLastPos = event.pos;
                 p.mouse.probeTravel += std::abs(d.x) + std::abs(d.y);
-                if (p.mouse.probeTravel > 3)
+                if (p.mouse.probeTravel > 2)
                 {
                     p.mouse.probeMoved = true;
                 }
-                // Slowed to about four of the hand's pixels for a pixel of
-                // the picture, so the picture in the loupe goes by at half
-                // the hand's speed; zoomed in far enough that its pixels
-                // are big on screen, the pointer goes at its own speed.
-                const double factor = std::max(1.0, 4.0 / std::max(getZoom(), 0.0001));
-                p.probeVirtual.x += d.x / factor;
-                p.probeVirtual.y += d.y / factor;
+                p.probeVirtual.x += d.x;
+                p.probeVirtual.y += d.y;
                 const ftk::V2I target(
                     static_cast<int>(std::lround(p.probeVirtual.x)),
                     static_cast<int>(std::lround(p.probeVirtual.y)));
@@ -771,17 +777,6 @@ namespace djv
                     // Held at the edge of the picture: coming back starts
                     // from the edge, not from wherever the hand went past it.
                     p.probeVirtual = ftk::V2F(p.probeWindowPos.x, p.probeWindowPos.y);
-                }
-                // The pointer follows the probe, so it is where the hand
-                // feels it is.
-                if (p.probeWindowPos != event.pos &&
-                    warpCursor(event.pos, p.probeWindowPos))
-                {
-                    p.probeLastPos = p.probeWindowPos;
-                }
-                else
-                {
-                    p.probeLastPos = event.pos;
                 }
                 _probeUpdate();
                 break;
@@ -843,6 +838,34 @@ namespace djv
                 p.mouse.probeMoved = false;
                 p.probeVirtual = ftk::V2F(event.pos.x, event.pos.y);
                 p.probeLastPos = event.pos;
+#if defined(FTK_SDL3)
+                // The mouse in relative mode while the button is held: the
+                // pointer is hidden -- the loupe is the pointer -- and the
+                // motion is the mouse's own, without the system's
+                // acceleration, which turned slow small moves into none. It
+                // is slowed to about two of the mouse's counts for a pixel
+                // of the picture; zoomed in far enough that the picture's
+                // pixels are big on screen, it goes at its own speed.
+                if (SDL_Window* window = SDL_GetMouseFocus())
+                {
+                    float x = 0.F;
+                    float y = 0.F;
+                    SDL_GetMouseState(&x, &y);
+                    p.probeSDLScale = x > 0.F ? event.pos.x / x : 1.F;
+                    if (!(p.probeSDLScale > 0.F))
+                    {
+                        p.probeSDLScale = 1.F;
+                    }
+                    const double scale = std::min(1.0, std::max(getZoom(), 0.0001) / 2.0);
+                    SDL_SetHint(
+                        SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE,
+                        std::to_string(scale).c_str());
+                    if (SDL_SetWindowRelativeMouseMode(window, true))
+                    {
+                        p.probeSDLWindow = window;
+                    }
+                }
+#endif // FTK_SDL3
                 p.probing = true;
                 p.probeLayout->setVisible(true);
                 // The pixel alone to start with; the wheel widens it.
@@ -909,6 +932,20 @@ namespace djv
                 p.probing = false;
                 p.probeLayout->setVisible(false);
                 p.loupe->setVisible(false);
+#if defined(FTK_SDL3)
+                if (p.probeSDLWindow)
+                {
+                    SDL_SetWindowRelativeMouseMode(p.probeSDLWindow, false);
+                    SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE);
+                    // The pointer comes back where the probe was, not where
+                    // the hand would have taken it.
+                    SDL_WarpMouseInWindow(
+                        p.probeSDLWindow,
+                        p.probeWindowPos.x / p.probeSDLScale,
+                        p.probeWindowPos.y / p.probeSDLScale);
+                    p.probeSDLWindow = nullptr;
+                }
+#endif // FTK_SDL3
                 if (!p.mouse.probeMoved && !event.cancel)
                 {
                     const auto& callback = getContextMenuCallback();
