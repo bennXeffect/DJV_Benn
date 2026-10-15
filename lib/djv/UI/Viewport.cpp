@@ -26,7 +26,9 @@
 #include <ftk/UI/RowLayout.h>
 #include <ftk/UI/ScreenshotTag.h>
 #include <ftk/UI/Spacer.h>
+#include <ftk/Core/Context.h>
 #include <ftk/Core/Format.h>
+#include <ftk/Core/LogSystem.h>
 #include <ftk/Core/String.h>
 #include <ftk/Core/Timer.h>
 
@@ -246,6 +248,11 @@ namespace djv
                 SDL_Window* shuttleSDLWindow = nullptr;
                 float shuttleSDLScale = 1.F;
 #endif // FTK_SDL3
+                //! For the log: the moves, the wraps, and how far the
+                //! pointer went.
+                int shuttleMoves = 0;
+                int shuttleWraps = 0;
+                ftk::Box2I shuttleSeen;
             };
             MouseData mouse;
 
@@ -1027,13 +1034,48 @@ namespace djv
                             p.mouse.shuttleSDLScale = 1.F;
                         }
                         SDL_AddEventWatch(&probeWatch, &p.shuttleMotion);
+                        // The pointer held in the viewport while the button
+                        // is, as Blender holds it in the editor it drags in,
+                        // and brought round inside it.
+                        const ftk::Box2I& g = getGeometry();
+                        const float scale = p.mouse.shuttleSDLScale;
+                        SDL_Rect rect;
+                        rect.x = static_cast<int>(std::ceil(g.min.x / scale));
+                        rect.y = static_cast<int>(std::ceil(g.min.y / scale));
+                        rect.w = std::max(static_cast<int>(std::floor(g.w() / scale)) - 1, 1);
+                        rect.h = std::max(static_cast<int>(std::floor(g.h() / scale)) - 1, 1);
+                        const bool confined = SDL_SetWindowMouseRect(window, &rect);
+                        float gx = 0.F;
+                        float gy = 0.F;
+                        SDL_GetGlobalMouseState(&gx, &gy);
+                        int wx = 0;
+                        int wy = 0;
+                        SDL_GetWindowPosition(window, &wx, &wy);
+                        _shuttleLog(ftk::Format(
+                            "Shuttle start: relative {0}, confined {1} to {2},{3} {4}x{5}, "
+                            "scale {6}, window at {7},{8}, viewport {9}, pointer at {10},{11}, "
+                            "event at {12}").
+                            arg(SDL_GetWindowRelativeMouseMode(window)).
+                            arg(confined).
+                            arg(rect.x).arg(rect.y).arg(rect.w).arg(rect.h).
+                            arg(scale).
+                            arg(wx).arg(wy).
+                            arg(g).
+                            arg(gx).arg(gy).
+                            arg(event.pos));
                     }
                     else
                     {
+                        _shuttleLog(ftk::Format("Shuttle start: no relative mode: {0}").
+                            arg(SDL_GetError()));
                         SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_CURSOR_VISIBLE);
                         SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER);
                         SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE);
                     }
+                }
+                else
+                {
+                    _shuttleLog("Shuttle start: no window with the mouse");
                 }
 #endif // FTK_SDL3
                 if (auto player = getPlayer())
@@ -1963,6 +2005,15 @@ namespace djv
                     static_cast<int>(std::lround((gx - wx) * scale)),
                     static_cast<int>(std::lround((gy - wy) * scale)));
                 const ftk::Box2I& g = getGeometry();
+                if (0 == p.mouse.shuttleMoves)
+                {
+                    p.mouse.shuttleSeen = ftk::Box2I(pos.x, pos.y, 1, 1);
+                }
+                else
+                {
+                    p.mouse.shuttleSeen = ftk::expand(p.mouse.shuttleSeen, pos);
+                }
+                ++p.mouse.shuttleMoves;
                 const int margin = 2;
                 if (g.w() > margin * 8 && g.h() > margin * 8)
                 {
@@ -1985,7 +2036,17 @@ namespace djv
                     }
                     if (warp != pos)
                     {
-                        SDL_WarpMouseGlobal(wx + warp.x / scale, wy + warp.y / scale);
+                        const bool warped = SDL_WarpMouseGlobal(wx + warp.x / scale, wy + warp.y / scale);
+                        ++p.mouse.shuttleWraps;
+                        if (p.mouse.shuttleWraps <= 10)
+                        {
+                            float ax = 0.F;
+                            float ay = 0.F;
+                            SDL_GetGlobalMouseState(&ax, &ay);
+                            _shuttleLog(ftk::Format(
+                                "Shuttle wrap: pointer {0} to {1}, warped {2}, now at {3},{4}").
+                                arg(pos).arg(warp).arg(warped).arg(ax - wx).arg(ay - wy));
+                        }
                         pos = warp;
                     }
                 }
@@ -2004,6 +2065,14 @@ namespace djv
             if (SDL_Window* window = p.mouse.shuttleSDLWindow)
             {
                 SDL_RemoveEventWatch(&probeWatch, &p.shuttleMotion);
+                SDL_SetWindowMouseRect(window, nullptr);
+                _shuttleLog(ftk::Format(
+                    "Shuttle end: {0} moves, {1} wraps, pointer within {2}, viewport {3}, {4} frames").
+                    arg(p.mouse.shuttleMoves).
+                    arg(p.mouse.shuttleWraps).
+                    arg(p.mouse.shuttleSeen).
+                    arg(getGeometry()).
+                    arg(p.mouse.shuttleOffset));
                 // The pointer stays where it is.
                 float gx = 0.F;
                 float gy = 0.F;
@@ -2019,6 +2088,14 @@ namespace djv
                 p.mouse.shuttleSDLWindow = nullptr;
             }
 #endif // FTK_SDL3
+        }
+
+        void Viewport::_shuttleLog(const std::string& text)
+        {
+            if (auto context = getContext())
+            {
+                context->getLogSystem()->print("djv::ui::Viewport", text);
+            }
         }
 
         void Viewport::_probeMove(const ftk::V2F& d)
