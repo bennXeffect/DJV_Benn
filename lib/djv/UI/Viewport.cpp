@@ -922,6 +922,11 @@ namespace djv
                 p.probeAverage = 0;
                 p.loupe->setAverage(p.probeAverage);
                 p.loupe->setVisible(true);
+                // The HUD's color picker reads a pixel of the screen, which
+                // zoomed out is several of the picture's blended, so beside
+                // the probe it disagreed with it. Out of the way while
+                // probing.
+                p.hudWidgets[models::HUDItem::ColorPicker]->setVisible(false);
                 _probeAt(event.pos);
                 _probeUpdate();
                 return;
@@ -982,6 +987,7 @@ namespace djv
                 p.probing = false;
                 p.probeLayout->setVisible(false);
                 p.loupe->setVisible(false);
+                p.hudWidgets[models::HUDItem::ColorPicker]->setVisible(true);
 #if defined(FTK_SDL3)
                 if (p.probeSDLWindow)
                 {
