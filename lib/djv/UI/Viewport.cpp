@@ -744,10 +744,7 @@ namespace djv
                 {
                     p.mouse.probeMoved = true;
                 }
-                sample(toViewportPos(event.pos));
-                p.probeWindowPos = event.pos;
-                p.loupe->setTarget(toRenderPos(toViewportPos(event.pos)));
-                _loupeGeometry();
+                _probeAt(event.pos);
                 _probeUpdate();
                 break;
             }
@@ -806,15 +803,12 @@ namespace djv
                 p.mouse.probePress = event.pos;
                 p.mouse.probeMoved = false;
                 p.probing = true;
-                sample(toViewportPos(event.pos));
                 p.probeLayout->setVisible(true);
                 // The pixel alone to start with; the wheel widens it.
                 p.probeAverage = 0;
-                p.probeWindowPos = event.pos;
                 p.loupe->setAverage(p.probeAverage);
-                p.loupe->setTarget(toRenderPos(toViewportPos(event.pos)));
                 p.loupe->setVisible(true);
-                _loupeGeometry();
+                _probeAt(event.pos);
                 _probeUpdate();
                 return;
             }
@@ -1649,6 +1643,44 @@ namespace djv
             {
                 _probeUpdate();
             }
+        }
+
+        void Viewport::_probeAt(const ftk::V2I& windowPos)
+        {
+            FTK_P();
+            // The pixel under the pointer, held inside the picture: past an
+            // edge the probe stays on the edge, so a corner is had by pushing
+            // past it rather than by aiming at it, and there is nothing
+            // outside the picture to measure anyway.
+            ftk::V2I renderPos = toRenderPos(toViewportPos(windowPos));
+            const ftk::Size2I renderSize = tl::getRenderSize(
+                getCompareOptions(),
+                p.binding->getDisplayOptions().aspectRatio,
+                p.videoFrames);
+            bool clamped = false;
+            if (renderSize.isValid())
+            {
+                const ftk::V2I tmp(
+                    std::clamp(renderPos.x, 0, renderSize.w - 1),
+                    std::clamp(renderPos.y, 0, renderSize.h - 1));
+                clamped = tmp != renderPos;
+                renderPos = tmp;
+            }
+            // Back to the viewport, the middle of the pixel, which is where
+            // the sample is taken and the loupe is put.
+            ftk::V2I viewportPos = toViewportPos(windowPos);
+            if (clamped)
+            {
+                const double zoom = getZoom();
+                const ftk::V2I corner = fromRenderPos(renderPos);
+                viewportPos = ftk::V2I(
+                    corner.x + static_cast<int>(zoom / 2.0),
+                    corner.y + static_cast<int>(zoom / 2.0));
+            }
+            sample(viewportPos);
+            p.probeWindowPos = viewportPos + getGeometry().min;
+            p.loupe->setTarget(renderPos);
+            _loupeGeometry();
         }
 
         void Viewport::_loupeGeometry()

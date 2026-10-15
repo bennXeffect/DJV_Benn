@@ -232,7 +232,7 @@ namespace djv
             const int n = p.average * 2 + 1;
             const std::string text = 0 == p.average ?
                 std::string("1 pixel") :
-                std::string(ftk::Format("{0}x{0} pixels averaged").arg(n));
+                std::string(ftk::Format("{0}x{1} pixels averaged").arg(n).arg(n));
             const ftk::Size2I textSize = event.fontSystem->getSize(text, p.size.fontInfo);
             const ftk::Box2I noteBox(
                 g.min.x,

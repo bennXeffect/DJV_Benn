@@ -133,6 +133,7 @@ namespace djv
             void _hudLayout();
             void _probeUpdate();
             void _loupeGeometry();
+            void _probeAt(const ftk::V2I& windowPos);
 
             FTK_PRIVATE();
         };
