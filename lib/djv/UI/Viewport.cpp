@@ -283,6 +283,10 @@ namespace djv
                 int shown = 0;
                 int64_t shownSkipped = 0;
                 double maxShownGap = 0.0;
+                //! The viewport's drawing, the picture with it, on the CPU.
+                int draws = 0;
+                double drawTotal = 0.0;
+                double drawMax = 0.0;
             };
             PlaybackStats playbackStats;
 
@@ -1480,8 +1484,26 @@ namespace djv
 
         void Viewport::drawEvent(const ftk::Box2I& drawRect, const ftk::DrawEvent& event)
         {
+            const auto drawStart = std::chrono::steady_clock::now();
             tl::ui::Viewport::drawEvent(drawRect, event);
             FTK_P();
+            // Timed for the playback report, however the drawing ends.
+            struct DrawTimer
+            {
+                Private::PlaybackStats& stats;
+                std::chrono::steady_clock::time_point start;
+                ~DrawTimer()
+                {
+                    if (stats.active)
+                    {
+                        const std::chrono::duration<double> d =
+                            std::chrono::steady_clock::now() - start;
+                        ++stats.draws;
+                        stats.drawTotal += d.count();
+                        stats.drawMax = std::max(stats.drawMax, d.count());
+                    }
+                }
+            } drawTimer{ p.playbackStats, drawStart };
 
             const ftk::Box2I& g = getGeometry();
             const double zoom = getZoom();
@@ -1834,17 +1856,21 @@ namespace djv
             // Every way of saying the time at once rather than the one the
             // time units setting picks: the frame number that names the
             // file, the position counted from the first frame of the media
-            // (renders seldom start at zero), the timecode and the seconds.
+            // (renders seldom start at zero), and the timecode and the
+            // seconds from that first frame too -- frame 986 of a render is
+            // not half a minute into anything.
             s = std::string();
             if (p.currentTime.has_value())
             {
                 const OTIO_NS::RationalTime& t = p.currentTime.value();
+                OTIO_NS::RationalTime fromStart = t;
                 std::vector<std::string> parts;
                 parts.push_back(tl::timeToText(t, tl::TimeUnits::Frames));
                 if (p.timeRange.has_value())
                 {
                     const OTIO_NS::RationalTime start =
                         p.timeRange->start_time().rescaled_to(t.rate());
+                    fromStart = t - start;
                     const int64_t index = static_cast<int64_t>(
                         std::llround(t.value() - start.value()));
                     const int64_t duration = static_cast<int64_t>(
@@ -1853,8 +1879,8 @@ namespace djv
                         arg(index).
                         arg(std::max(duration - 1, static_cast<int64_t>(0))));
                 }
-                parts.push_back(tl::timeToText(t, tl::TimeUnits::Timecode));
-                parts.push_back(tl::timeToText(t, tl::TimeUnits::Seconds) + "s");
+                parts.push_back(tl::timeToText(fromStart, tl::TimeUnits::Timecode));
+                parts.push_back(tl::timeToText(fromStart, tl::TimeUnits::Seconds) + "s");
                 s = ftk::join(parts, "  ");
             }
             else if (auto timeUnitsModel = p.timeUnitsModel.lock())
@@ -2330,7 +2356,8 @@ namespace djv
                 _log(ftk::Format(
                     "Playback at {0} of {1} fps, audio {2}: shown {3} fps ({4} skipped), "
                     "clock {5} fps ({6} jumps), {7} ticks a second, longest tick {8} ms, "
-                    "longest between frames {9} ms").
+                    "longest between frames {9} ms, viewport drawn {10} times a second "
+                    "in {11} ms, at most {12} ms").
                     arg(player->getSpeed(), 2).
                     arg(timeRange.duration().rate(), 2).
                     arg(player->getIOInfo().audio.isValid() ? "yes" : "no").
@@ -2340,7 +2367,10 @@ namespace djv
                     arg(stats.clockJumps).
                     arg(stats.ticks / secs, 1).
                     arg(stats.maxTickGap * 1000.0, 1).
-                    arg(stats.maxShownGap * 1000.0, 1));
+                    arg(stats.maxShownGap * 1000.0, 1).
+                    arg(stats.draws / secs, 1).
+                    arg(stats.draws > 0 ? stats.drawTotal / stats.draws * 1000.0 : 0.0, 1).
+                    arg(stats.drawMax * 1000.0, 1));
             };
             if (playing && !stats.active)
             {

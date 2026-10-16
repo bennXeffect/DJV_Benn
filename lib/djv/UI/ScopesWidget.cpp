@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <future>
 
 #if defined(TLRENDER_OCIO)
 namespace OCIO = OCIO_NAMESPACE;
@@ -85,6 +86,199 @@ namespace djv
                 p[2] = toU8(b);
                 p[3] = toU8(a);
             }
+
+            //! What the measurement works from: its own references, so the
+            //! widget can go on while it runs.
+            struct ScopesJob
+            {
+                std::shared_ptr<ftk::Image> frame;
+#if defined(TLRENDER_OCIO)
+                OCIO::ConstCPUProcessorRcPtr processor;
+#endif // TLRENDER_OCIO
+                ScopesSource source = ScopesSource::Display;
+            };
+
+            struct ScopesResult
+            {
+                std::shared_ptr<ftk::Image> histogram;
+                std::shared_ptr<ftk::Image> waveform;
+                std::shared_ptr<ftk::Image> vectorscope;
+            };
+
+            //! Measures the frame: run off the main thread, where it held
+            //! playback up -- with the display transform applied on the CPU,
+            //! tens of milliseconds a time, ten times a second.
+            ScopesResult measure(const ScopesJob& job)
+            {
+                ScopesResult out;
+                if (!job.frame)
+                {
+                    return out;
+                }
+                const ftk::ImageInfo& info = job.frame->getInfo();
+                const int w = info.size.w;
+                const int h = info.size.h;
+                if (w <= 0 || h <= 0)
+                {
+                    return out;
+                }
+
+                // Sample the frame on a grid.
+                const int stepX = std::max(1, w / sampleW);
+                const int stepY = std::max(1, h / sampleH);
+                const int cols = (w + stepX - 1) / stepX;
+                const int rows = (h + stepY - 1) / stepY;
+                std::vector<float> values;
+                values.reserve(static_cast<size_t>(cols) * rows * 4);
+                std::vector<int> xs;
+                xs.reserve(static_cast<size_t>(cols) * rows);
+                for (int y = 0; y < h; y += stepY)
+                {
+                    for (int x = 0; x < w; x += stepX)
+                    {
+                        const auto c = readPixel(job.frame, ftk::V2I(x, y));
+                        if (!c.has_value())
+                        {
+                            return out;
+                        }
+                        values.push_back(c->r);
+                        values.push_back(c->g);
+                        values.push_back(c->b);
+                        values.push_back(c->a);
+                        xs.push_back(x);
+                    }
+                }
+                const size_t count = xs.size();
+                if (0 == count)
+                {
+                    return out;
+                }
+#if defined(TLRENDER_OCIO)
+                if (ScopesSource::Display == job.source && job.processor)
+                {
+                    OCIO::PackedImageDesc desc(
+                        values.data(),
+                        static_cast<long>(count),
+                        1,
+                        4);
+                    job.processor->apply(desc);
+                }
+#endif // TLRENDER_OCIO
+
+                // Histogram: the red, green and blue counts over the range from
+                // zero to one, values past it in the last bin.
+                std::vector<int> hist(256 * 3, 0);
+                // Waveform: the value of each channel by column.
+                std::vector<int> wave(static_cast<size_t>(waveformW) * waveformH * 3, 0);
+                // Vectorscope: the Rec.709 chroma of each sample.
+                std::vector<int> vec(static_cast<size_t>(vectorscopeSize) * vectorscopeSize, 0);
+                for (size_t i = 0; i < count; ++i)
+                {
+                    const float* v = &values[i * 4];
+                    const int wx = std::min(waveformW - 1, xs[i] * waveformW / w);
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        const float c = std::clamp(v[k], 0.F, 1.F);
+                        ++hist[k * 256 + std::min(255, static_cast<int>(c * 255.F + .5F))];
+                        const int wy = std::min(waveformH - 1, static_cast<int>(c * (waveformH - 1) + .5F));
+                        ++wave[(static_cast<size_t>(wy) * waveformW + wx) * 3 + k];
+                    }
+                    const float r = std::clamp(v[0], 0.F, 1.F);
+                    const float g = std::clamp(v[1], 0.F, 1.F);
+                    const float b = std::clamp(v[2], 0.F, 1.F);
+                    const float cb = -.1146F * r - .3854F * g + .5F * b;
+                    const float cr = .5F * r - .4542F * g - .0458F * b;
+                    const int vx = std::clamp(static_cast<int>((cb + .5F) * (vectorscopeSize - 1) + .5F), 0, vectorscopeSize - 1);
+                    const int vy = std::clamp(static_cast<int>((cr + .5F) * (vectorscopeSize - 1) + .5F), 0, vectorscopeSize - 1);
+                    ++vec[static_cast<size_t>(vy) * vectorscopeSize + vx];
+                }
+
+                // Histogram image. Scaled to the tallest bin away from the two
+                // ends, which a frame with a black or a clipped background fills
+                // and which would otherwise flatten everything else.
+                {
+                    int max = 1;
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        for (int i = 1; i < 255; ++i)
+                        {
+                            max = std::max(max, hist[k * 256 + i]);
+                        }
+                    }
+                    out.histogram = createImage(histogramW, histogramH);
+                    for (int x = 0; x < histogramW; ++x)
+                    {
+                        float heights[3];
+                        for (int k = 0; k < 3; ++k)
+                        {
+                            heights[k] = std::min(1.F, hist[k * 256 + x] / static_cast<float>(max)) * histogramH;
+                        }
+                        for (int y = 0; y < histogramH; ++y)
+                        {
+                            const float r = y < heights[0] ? .8F : 0.F;
+                            const float g = y < heights[1] ? .8F : 0.F;
+                            const float b = y < heights[2] ? .8F : 0.F;
+                            if (r > 0.F || g > 0.F || b > 0.F)
+                            {
+                                setPixel(out.histogram, x, y, r, g, b, .9F);
+                            }
+                        }
+                    }
+                }
+
+                // Waveform image, the channels added together, brighter where
+                // more of the column has that value.
+                {
+                    const float perColumn = count / static_cast<float>(waveformW);
+                    const float scale = std::log1p(std::max(1.F, perColumn * .1F));
+                    out.waveform = createImage(waveformW, waveformH);
+                    for (int y = 0; y < waveformH; ++y)
+                    {
+                        for (int x = 0; x < waveformW; ++x)
+                        {
+                            const int* c = &wave[(static_cast<size_t>(y) * waveformW + x) * 3];
+                            if (c[0] || c[1] || c[2])
+                            {
+                                const float r = std::log1p(static_cast<float>(c[0])) / scale;
+                                const float g = std::log1p(static_cast<float>(c[1])) / scale;
+                                const float b = std::log1p(static_cast<float>(c[2])) / scale;
+                                setPixel(out.waveform, x, y, r, g, b, std::max({ r, g, b }));
+                            }
+                        }
+                    }
+                }
+
+                // Vectorscope image.
+                {
+                    int max = 1;
+                    for (size_t i = 0; i < vec.size(); ++i)
+                    {
+                        // The center is every grey pixel, which would swamp the
+                        // rest.
+                        const int x = static_cast<int>(i % vectorscopeSize);
+                        const int y = static_cast<int>(i / vectorscopeSize);
+                        if (std::abs(x - vectorscopeSize / 2) > 1 || std::abs(y - vectorscopeSize / 2) > 1)
+                        {
+                            max = std::max(max, vec[i]);
+                        }
+                    }
+                    const float scale = std::log1p(static_cast<float>(max));
+                    out.vectorscope = createImage(vectorscopeSize, vectorscopeSize);
+                    for (int y = 0; y < vectorscopeSize; ++y)
+                    {
+                        for (int x = 0; x < vectorscopeSize; ++x)
+                        {
+                            const int n = vec[static_cast<size_t>(y) * vectorscopeSize + x];
+                            if (n > 0)
+                            {
+                                const float i = std::min(1.F, std::log1p(static_cast<float>(n)) / scale);
+                                setPixel(out.vectorscope, x, y, .6F + .4F * i, 1.F, .6F + .4F * i, .3F + .7F * i);
+                            }
+                        }
+                    }
+                }
+                return out;
+            }
         }
 
         struct ScopesWidget::Private
@@ -103,6 +297,9 @@ namespace djv
             std::shared_ptr<ftk::Image> histogram;
             std::shared_ptr<ftk::Image> waveform;
             std::shared_ptr<ftk::Image> vectorscope;
+            //! The measurement running, one at a time; a frame that comes
+            //! meanwhile is measured after it.
+            std::future<ScopesResult> measuring;
 
             struct SizeData
             {
@@ -252,16 +449,37 @@ namespace djv
             FTK_P();
             // Measured at most ten times a second, and only while shown: the
             // scopes cost nothing when the tool is closed.
+            if (p.measuring.valid() &&
+                std::future_status::ready == p.measuring.wait_for(std::chrono::seconds(0)))
+            {
+                ScopesResult result = p.measuring.get();
+                p.histogram = result.histogram;
+                p.waveform = result.waveform;
+                p.vectorscope = result.vectorscope;
+                setDrawUpdate();
+            }
             const auto now = std::chrono::steady_clock::now();
             if (p.dirty &&
+                !p.measuring.valid() &&
                 parentsVisible &&
                 isVisible(false) &&
                 now - p.lastCompute >= std::chrono::milliseconds(100))
             {
                 p.lastCompute = now;
                 p.dirty = false;
-                _compute();
-                setDrawUpdate();
+                _processorUpdate();
+                ScopesJob job;
+                job.frame = p.frame;
+#if defined(TLRENDER_OCIO)
+                job.processor = p.processor;
+#endif // TLRENDER_OCIO
+                job.source = p.source;
+                p.measuring = std::async(
+                    std::launch::async,
+                    [job]
+                    {
+                        return measure(job);
+                    });
             }
         }
 
@@ -371,24 +589,9 @@ namespace djv
             }
         }
 
-        void ScopesWidget::_compute()
+        void ScopesWidget::_processorUpdate()
         {
             FTK_P();
-            p.histogram.reset();
-            p.waveform.reset();
-            p.vectorscope.reset();
-            if (!p.frame)
-            {
-                return;
-            }
-            const ftk::ImageInfo& info = p.frame->getInfo();
-            const int w = info.size.w;
-            const int h = info.size.h;
-            if (w <= 0 || h <= 0)
-            {
-                return;
-            }
-
 #if defined(TLRENDER_OCIO)
             // The display transform the viewport applies, rebuilt when the
             // color options or the file's input color space change.
@@ -464,161 +667,6 @@ namespace djv
                 }
             }
 #endif // TLRENDER_OCIO
-
-            // Sample the frame on a grid.
-            const int stepX = std::max(1, w / sampleW);
-            const int stepY = std::max(1, h / sampleH);
-            const int cols = (w + stepX - 1) / stepX;
-            const int rows = (h + stepY - 1) / stepY;
-            std::vector<float> values;
-            values.reserve(static_cast<size_t>(cols) * rows * 4);
-            std::vector<int> xs;
-            xs.reserve(static_cast<size_t>(cols) * rows);
-            for (int y = 0; y < h; y += stepY)
-            {
-                for (int x = 0; x < w; x += stepX)
-                {
-                    const auto c = readPixel(p.frame, ftk::V2I(x, y));
-                    if (!c.has_value())
-                    {
-                        return;
-                    }
-                    values.push_back(c->r);
-                    values.push_back(c->g);
-                    values.push_back(c->b);
-                    values.push_back(c->a);
-                    xs.push_back(x);
-                }
-            }
-            const size_t count = xs.size();
-            if (0 == count)
-            {
-                return;
-            }
-#if defined(TLRENDER_OCIO)
-            if (ScopesSource::Display == p.source && p.processor)
-            {
-                OCIO::PackedImageDesc desc(
-                    values.data(),
-                    static_cast<long>(count),
-                    1,
-                    4);
-                p.processor->apply(desc);
-            }
-#endif // TLRENDER_OCIO
-
-            // Histogram: the red, green and blue counts over the range from
-            // zero to one, values past it in the last bin.
-            std::vector<int> hist(256 * 3, 0);
-            // Waveform: the value of each channel by column.
-            std::vector<int> wave(static_cast<size_t>(waveformW) * waveformH * 3, 0);
-            // Vectorscope: the Rec.709 chroma of each sample.
-            std::vector<int> vec(static_cast<size_t>(vectorscopeSize) * vectorscopeSize, 0);
-            for (size_t i = 0; i < count; ++i)
-            {
-                const float* v = &values[i * 4];
-                const int wx = std::min(waveformW - 1, xs[i] * waveformW / w);
-                for (int k = 0; k < 3; ++k)
-                {
-                    const float c = std::clamp(v[k], 0.F, 1.F);
-                    ++hist[k * 256 + std::min(255, static_cast<int>(c * 255.F + .5F))];
-                    const int wy = std::min(waveformH - 1, static_cast<int>(c * (waveformH - 1) + .5F));
-                    ++wave[(static_cast<size_t>(wy) * waveformW + wx) * 3 + k];
-                }
-                const float r = std::clamp(v[0], 0.F, 1.F);
-                const float g = std::clamp(v[1], 0.F, 1.F);
-                const float b = std::clamp(v[2], 0.F, 1.F);
-                const float cb = -.1146F * r - .3854F * g + .5F * b;
-                const float cr = .5F * r - .4542F * g - .0458F * b;
-                const int vx = std::clamp(static_cast<int>((cb + .5F) * (vectorscopeSize - 1) + .5F), 0, vectorscopeSize - 1);
-                const int vy = std::clamp(static_cast<int>((cr + .5F) * (vectorscopeSize - 1) + .5F), 0, vectorscopeSize - 1);
-                ++vec[static_cast<size_t>(vy) * vectorscopeSize + vx];
-            }
-
-            // Histogram image. Scaled to the tallest bin away from the two
-            // ends, which a frame with a black or a clipped background fills
-            // and which would otherwise flatten everything else.
-            {
-                int max = 1;
-                for (int k = 0; k < 3; ++k)
-                {
-                    for (int i = 1; i < 255; ++i)
-                    {
-                        max = std::max(max, hist[k * 256 + i]);
-                    }
-                }
-                p.histogram = createImage(histogramW, histogramH);
-                for (int x = 0; x < histogramW; ++x)
-                {
-                    float heights[3];
-                    for (int k = 0; k < 3; ++k)
-                    {
-                        heights[k] = std::min(1.F, hist[k * 256 + x] / static_cast<float>(max)) * histogramH;
-                    }
-                    for (int y = 0; y < histogramH; ++y)
-                    {
-                        const float r = y < heights[0] ? .8F : 0.F;
-                        const float g = y < heights[1] ? .8F : 0.F;
-                        const float b = y < heights[2] ? .8F : 0.F;
-                        if (r > 0.F || g > 0.F || b > 0.F)
-                        {
-                            setPixel(p.histogram, x, y, r, g, b, .9F);
-                        }
-                    }
-                }
-            }
-
-            // Waveform image, the channels added together, brighter where
-            // more of the column has that value.
-            {
-                const float perColumn = count / static_cast<float>(waveformW);
-                const float scale = std::log1p(std::max(1.F, perColumn * .1F));
-                p.waveform = createImage(waveformW, waveformH);
-                for (int y = 0; y < waveformH; ++y)
-                {
-                    for (int x = 0; x < waveformW; ++x)
-                    {
-                        const int* c = &wave[(static_cast<size_t>(y) * waveformW + x) * 3];
-                        if (c[0] || c[1] || c[2])
-                        {
-                            const float r = std::log1p(static_cast<float>(c[0])) / scale;
-                            const float g = std::log1p(static_cast<float>(c[1])) / scale;
-                            const float b = std::log1p(static_cast<float>(c[2])) / scale;
-                            setPixel(p.waveform, x, y, r, g, b, std::max({ r, g, b }));
-                        }
-                    }
-                }
-            }
-
-            // Vectorscope image.
-            {
-                int max = 1;
-                for (size_t i = 0; i < vec.size(); ++i)
-                {
-                    // The center is every grey pixel, which would swamp the
-                    // rest.
-                    const int x = static_cast<int>(i % vectorscopeSize);
-                    const int y = static_cast<int>(i / vectorscopeSize);
-                    if (std::abs(x - vectorscopeSize / 2) > 1 || std::abs(y - vectorscopeSize / 2) > 1)
-                    {
-                        max = std::max(max, vec[i]);
-                    }
-                }
-                const float scale = std::log1p(static_cast<float>(max));
-                p.vectorscope = createImage(vectorscopeSize, vectorscopeSize);
-                for (int y = 0; y < vectorscopeSize; ++y)
-                {
-                    for (int x = 0; x < vectorscopeSize; ++x)
-                    {
-                        const int n = vec[static_cast<size_t>(y) * vectorscopeSize + x];
-                        if (n > 0)
-                        {
-                            const float i = std::min(1.F, std::log1p(static_cast<float>(n)) / scale);
-                            setPixel(p.vectorscope, x, y, .6F + .4F * i, 1.F, .6F + .4F * i, .3F + .7F * i);
-                        }
-                    }
-                }
-            }
         }
     }
 }

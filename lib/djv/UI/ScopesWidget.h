@@ -74,7 +74,7 @@ namespace djv
             DJV_UI_API void drawEvent(const ftk::Box2I&, const ftk::DrawEvent&) override;
 
         private:
-            void _compute();
+            void _processorUpdate();
 
             FTK_PRIVATE();
         };
