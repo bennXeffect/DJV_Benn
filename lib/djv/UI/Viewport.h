@@ -155,7 +155,8 @@ namespace djv
             void _probeMove(const ftk::V2F&);
             void _shuttleMove(const ftk::V2F&);
             void _shuttleEnd();
-            void _shuttleLog(const std::string&);
+            void _log(const std::string&);
+            void _playbackStats();
 
             FTK_PRIVATE();
         };

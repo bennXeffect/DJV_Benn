@@ -9,6 +9,10 @@ set(DJV_BIN djv)
 
 add_executable(${DJV_BIN} WIN32 ${HEADERS} ${SOURCE})
 target_link_libraries(${DJV_BIN} djvApp)
+if(WIN32)
+    # timeBeginPeriod(): see main.cpp.
+    target_link_libraries(${DJV_BIN} winmm)
+endif()
 set_target_properties(${DJV_BIN} PROPERTIES FOLDER bin)
 
 if(APPLE AND DJV_MACOS_PACKAGE)
@@ -52,6 +56,7 @@ endif()
 if(WIN32)
     add_executable(djv. ${HEADERS} ${SOURCE})
     target_link_libraries(djv. djvApp)
+    target_link_libraries(djv. winmm)
     set_target_properties(
         djv. PROPERTIES
         SUFFIX com

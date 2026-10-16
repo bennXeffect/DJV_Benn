@@ -18,8 +18,29 @@
 #include <tchar.h>
 #endif // _WINDOWS
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif // WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <timeapi.h>
+#endif // _WIN32
+
 FTK_MAIN()
 {
+#if defined(_WIN32)
+    // Waits to the millisecond rather than the system's default of a
+    // sixty-fourth of a second. The application's loop and the player's
+    // thread each wait a few milliseconds between turns, and a wait of
+    // four came back after sixteen: the loop then went whole frames of
+    // playback without a turn, and those frames were never shown -- 27 or
+    // 28 of 30 a second. For as long as the application runs.
+    struct TimerResolution
+    {
+        TimerResolution() { timeBeginPeriod(1); }
+        ~TimerResolution() { timeEndPeriod(1); }
+    } timerResolution;
+#endif // _WIN32
     try
     {
         auto context = ftk::Context::create();

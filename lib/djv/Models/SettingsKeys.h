@@ -33,7 +33,10 @@ namespace djv
             constexpr const char* thumbnailCache = "/ThumbnailCache";
             constexpr const char* exportSettings = "/Export";
             constexpr const char* fileBrowser = "/FileBrowser";
-            constexpr const char* imageSeq = "/ImageSeq.1";
+            constexpr const char* imageSeq = "/ImageSeq.2";
+            //! The image sequence settings before version 2, read when there
+            //! are no others to bring them across.
+            constexpr const char* imageSeqPrevious = "/ImageSeq.1";
             constexpr const char* otio = "/OTIO.2";
             constexpr const char* shortcuts = "/Shortcuts.4";
             //! Read for the shortcuts of a version before, not written.

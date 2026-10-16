@@ -30,6 +30,7 @@ namespace djv
                 settingsKeys::exportSettings,
                 settingsKeys::fileBrowser,
                 settingsKeys::imageSeq,
+                settingsKeys::imageSeqPrevious,
                 settingsKeys::otio,
                 settingsKeys::shortcuts,
                 settingsKeys::shortcutsPrevious,

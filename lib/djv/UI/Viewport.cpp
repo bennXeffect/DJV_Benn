@@ -38,6 +38,7 @@
 #endif // FTK_SDL3
 
 #include <algorithm>
+#include <chrono>
 
 #include <cmath>
 #include <regex>
@@ -255,11 +256,35 @@ namespace djv
                 //! brought round inside the viewport.
                 bool shuttleDrawn = false;
                 ftk::V2F shuttlePointer;
+                //! Where the pointer is, drawn or the system's, for the
+                //! frame number under it.
+                ftk::V2I shuttleCursor;
                 //! For the log: how far the drag went.
                 float shuttleTravel = 0.F;
                 int shuttleWraps = 0;
             };
             MouseData mouse;
+
+            //! What playback showed, reported to the log every few seconds
+            //! while it plays: the frames shown against the frames the clock
+            //! went through, and the longest waits.
+            struct PlaybackStats
+            {
+                bool active = false;
+                std::chrono::steady_clock::time_point start;
+                std::chrono::steady_clock::time_point lastTick;
+                std::chrono::steady_clock::time_point lastShownTime;
+                int ticks = 0;
+                double maxTickGap = 0.0;
+                std::optional<OTIO_NS::RationalTime> lastClock;
+                int64_t clockFrames = 0;
+                int clockJumps = 0;
+                std::optional<OTIO_NS::RationalTime> lastShown;
+                int shown = 0;
+                int64_t shownSkipped = 0;
+                double maxShownGap = 0.0;
+            };
+            PlaybackStats playbackStats;
 
             //! The stroke being drawn, in the image pixels of its source.
             models::ReviewStroke stroke;
@@ -723,6 +748,25 @@ namespace djv
                     player->observeCurrentTime(),
                     [this](const OTIO_NS::RationalTime& value)
                     {
+                        auto& stats = _p->playbackStats;
+                        if (stats.active)
+                        {
+                            if (stats.lastClock.has_value())
+                            {
+                                const int64_t frames = std::llabs(std::llround(
+                                    (value - stats.lastClock.value()).rescaled_to(value.rate()).value()));
+                                // A loop comes round: not a step.
+                                if (frames < 100)
+                                {
+                                    stats.clockFrames += frames;
+                                    if (frames > 1)
+                                    {
+                                        ++stats.clockJumps;
+                                    }
+                                }
+                            }
+                            stats.lastClock = value;
+                        }
                         _p->currentTime = value;
                         _hudUpdate();
                         // Annotations are per frame, so the overlay changes.
@@ -734,6 +778,29 @@ namespace djv
                     [this](const std::vector<tl::VideoFrame>& value)
                     {
                         FTK_P();
+                        auto& stats = p.playbackStats;
+                        if (stats.active && !value.empty())
+                        {
+                            const OTIO_NS::RationalTime t = value.front().time;
+                            if (!stats.lastShown.has_value() || t != stats.lastShown.value())
+                            {
+                                const auto now = std::chrono::steady_clock::now();
+                                if (stats.lastShown.has_value())
+                                {
+                                    const int64_t frames = std::llabs(std::llround(
+                                        (t - stats.lastShown.value()).rescaled_to(t.rate()).value()));
+                                    if (frames > 1 && frames < 100)
+                                    {
+                                        stats.shownSkipped += frames - 1;
+                                    }
+                                    const std::chrono::duration<double> gap = now - stats.lastShownTime;
+                                    stats.maxShownGap = std::max(stats.maxShownGap, gap.count());
+                                }
+                                ++stats.shown;
+                                stats.lastShown = t;
+                                stats.lastShownTime = now;
+                            }
+                        }
                         p.videoFramesSize = value.size();
                         p.videoFrames = value;
                         p.binding->setVideoFramesSize(value.size());
@@ -1030,6 +1097,7 @@ namespace djv
                 // other end puts it, and Parsec sends the mouse's own motion
                 // only while the pointer is hidden.
                 p.mouse.shuttlePointer = ftk::V2F(event.pos.x, event.pos.y);
+                p.mouse.shuttleCursor = event.pos;
                 p.mouse.shuttleDrawn = isParsecConnected();
                 if (SDL_Window* window = SDL_GetMouseFocus())
                 {
@@ -1068,7 +1136,7 @@ namespace djv
                     }
                     else
                     {
-                        _shuttleLog(ftk::Format("Shuttle: no relative mode: {0}").
+                        _log(ftk::Format("Shuttle: no relative mode: {0}").
                             arg(SDL_GetError()));
                         SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE);
                         SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_CURSOR_VISIBLE);
@@ -1576,6 +1644,56 @@ namespace djv
                 event.render->setClipRectEnabled(clipRectEnabledPrev);
                 event.render->setClipRect(clipRectPrev);
             }
+
+            // The frame under the pointer while the shuttle drags: the
+            // number that names the file and the position from the first
+            // frame, as the heads up display has them.
+            if (Private::MouseMode::Shuttle == p.mouse.mode &&
+                p.mouse.shuttleSDLWindow &&
+                p.currentTime.has_value())
+            {
+                const OTIO_NS::RationalTime& t = p.currentTime.value();
+                std::string text = tl::timeToText(t, tl::TimeUnits::Frames);
+                if (p.timeRange.has_value())
+                {
+                    const OTIO_NS::RationalTime start =
+                        p.timeRange->start_time().rescaled_to(t.rate());
+                    text += ftk::Format("  #{0}").
+                        arg(static_cast<int64_t>(std::llround(t.value() - start.value())));
+                }
+                const float s = event.displayScale;
+                const ftk::FontInfo fontInfo = event.style->getFont(ftk::FontType::Regular, s);
+                const ftk::FontMetrics fontMetrics = event.fontSystem->getMetrics(fontInfo);
+                const ftk::Size2I textSize = event.fontSystem->getSize(text, fontInfo);
+                const int margin = event.style->getSizeRole(ftk::SizeRole::MarginInside, s);
+                // Below the pointer: the drawn arrow is centered on it, the
+                // system's hangs from it.
+                const ftk::V2I& c = p.mouse.shuttleCursor;
+                const int below = static_cast<int>((p.mouse.shuttleDrawn ? 12.F : 26.F) * s);
+                const ftk::Box2I& g = getGeometry();
+                ftk::Box2I box(
+                    c.x - textSize.w / 2 - margin,
+                    c.y + below,
+                    textSize.w + margin * 2,
+                    fontMetrics.lineHeight + margin * 2);
+                // Kept in the viewport, above the pointer when there is no
+                // room under it.
+                if (box.max.y > g.max.y)
+                {
+                    box = ftk::Box2I(box.min.x, c.y - below - box.h(), box.w(), box.h());
+                }
+                box = ftk::Box2I(
+                    std::clamp(box.min.x, g.min.x, std::max(g.min.x, g.max.x - box.w() + 1)),
+                    std::clamp(box.min.y, g.min.y, std::max(g.min.y, g.max.y - box.h() + 1)),
+                    box.w(),
+                    box.h());
+                event.render->drawRect(box, event.style->getColorRole(ftk::ColorRole::Overlay));
+                event.render->drawText(
+                    event.fontSystem->getGlyphs(text, fontInfo),
+                    fontMetrics,
+                    ftk::V2I(box.min.x + margin, box.min.y + margin),
+                    event.style->getColorRole(ftk::ColorRole::Text));
+            }
 #endif // FTK_SDL3
         }
 
@@ -1978,6 +2096,7 @@ namespace djv
         {
             tl::ui::Viewport::tickEvent(parentsVisible, parentsEnabled, event);
             FTK_P();
+            _playbackStats();
             // The loupe's values are read back from what it last drew, which
             // is a frame behind a move; read them again until the button is
             // let go, so they settle on the pixel pointed at.
@@ -2102,6 +2221,11 @@ namespace djv
                 // pointer back there when relative mode ends. In relative
                 // mode this moves nothing.
                 SDL_WarpMouseInWindow(window, pos.x / scale, pos.y / scale);
+                if (pos != p.mouse.shuttleCursor)
+                {
+                    p.mouse.shuttleCursor = pos;
+                    setDrawUpdate();
+                }
             }
             else if (window)
             {
@@ -2135,6 +2259,9 @@ namespace djv
                 // relative mode this moves nothing.
                 const float scale = p.mouse.shuttleSDLScale;
                 SDL_WarpMouseInWindow(window, pointer.x / scale, pointer.y / scale);
+                p.mouse.shuttleCursor = ftk::V2I(
+                    static_cast<int>(std::floor(pointer.x)),
+                    static_cast<int>(std::floor(pointer.y)));
                 setDrawUpdate();
             }
 #endif // FTK_SDL3
@@ -2175,7 +2302,7 @@ namespace djv
                 SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER);
                 p.mouse.shuttleSDLWindow = nullptr;
                 setDrawUpdate();
-                _shuttleLog(ftk::Format("Shuttle ({0} pointer): {1} pixels, {2} wraps, {3} frames").
+                _log(ftk::Format("Shuttle ({0} pointer): {1} pixels, {2} wraps, {3} frames").
                     arg(p.mouse.shuttleDrawn ? "drawn" : "system").
                     arg(p.mouse.shuttleTravel, 0).
                     arg(p.mouse.shuttleWraps).
@@ -2184,7 +2311,75 @@ namespace djv
 #endif // FTK_SDL3
         }
 
-        void Viewport::_shuttleLog(const std::string& text)
+        void Viewport::_playbackStats()
+        {
+            FTK_P();
+            auto& stats = p.playbackStats;
+            const auto player = getPlayer();
+            const bool playing = player && player->getPlayback() != tl::Playback::Stop;
+            const auto now = std::chrono::steady_clock::now();
+            const auto report = [this, &stats, &player, now]
+            {
+                const std::chrono::duration<double> d = now - stats.start;
+                if (d.count() < 1.0 || !player)
+                {
+                    return;
+                }
+                const double secs = d.count();
+                const OTIO_NS::TimeRange& timeRange = player->getTimeRange();
+                _log(ftk::Format(
+                    "Playback at {0} of {1} fps, audio {2}: shown {3} fps ({4} skipped), "
+                    "clock {5} fps ({6} jumps), {7} ticks a second, longest tick {8} ms, "
+                    "longest between frames {9} ms").
+                    arg(player->getSpeed(), 2).
+                    arg(timeRange.duration().rate(), 2).
+                    arg(player->getIOInfo().audio.isValid() ? "yes" : "no").
+                    arg(stats.shown / secs, 2).
+                    arg(stats.shownSkipped).
+                    arg(stats.clockFrames / secs, 2).
+                    arg(stats.clockJumps).
+                    arg(stats.ticks / secs, 1).
+                    arg(stats.maxTickGap * 1000.0, 1).
+                    arg(stats.maxShownGap * 1000.0, 1));
+            };
+            if (playing && !stats.active)
+            {
+                stats = Private::PlaybackStats();
+                stats.active = true;
+                stats.start = now;
+                stats.lastTick = now;
+                stats.lastShownTime = now;
+                return;
+            }
+            if (!playing)
+            {
+                if (stats.active)
+                {
+                    report();
+                    stats.active = false;
+                }
+                return;
+            }
+            const std::chrono::duration<double> gap = now - stats.lastTick;
+            stats.maxTickGap = std::max(stats.maxTickGap, gap.count());
+            stats.lastTick = now;
+            ++stats.ticks;
+            if (now - stats.start >= std::chrono::seconds(5))
+            {
+                report();
+                // The next five seconds, from where these left off.
+                Private::PlaybackStats next;
+                next.active = true;
+                next.start = now;
+                next.lastTick = now;
+                next.lastShownTime = stats.lastShownTime;
+                next.lastClock = stats.lastClock;
+                next.lastShown = stats.lastShown;
+                stats = next;
+            }
+        }
+
+        void Viewport::_log(const std::string& text)
         {
             if (auto context = getContext())
             {

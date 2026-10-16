@@ -282,7 +282,23 @@ namespace djv
             fileBrowserSystem->getModel()->setExt(fileBrowser.ext);
 
             ImageSeqSettings imageSeq;
-            settings->getT(keys["ImageSeq"], imageSeq);
+            if (!settings->getT(keys["ImageSeq"], imageSeq) &&
+                settings->getT(settingsKeys::imageSeqPrevious, imageSeq))
+            {
+                // The settings save every value, the defaults too, so a
+                // default that changed never reached anyone who had saved
+                // before: sequences went on opening at 24 frames a second,
+                // decoded on eight threads. Those two are brought up to the
+                // defaults of now, once, with the rest kept.
+                if (24.0 == imageSeq.io.defaultSpeed)
+                {
+                    imageSeq.io.defaultSpeed = tl::SeqOptions().defaultSpeed;
+                }
+                if (8 == imageSeq.readThreadCount)
+                {
+                    imageSeq.readThreadCount = tl::getDefaultReadThreadCount();
+                }
+            }
             p.imageSeq = ftk::Observable<ImageSeqSettings>::create(imageSeq);
 
             OTIOSettings otio;
