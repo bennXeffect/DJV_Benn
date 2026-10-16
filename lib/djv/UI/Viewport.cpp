@@ -5,6 +5,7 @@
 
 #include <djv/UI/PixelLoupe.h>
 #include <djv/UI/PixelProbe.h>
+#include <djv/UI/RemoteSession.h>
 #include <djv/UI/ViewportBinding.h>
 
 #include <djv/Models/AnnotationsModel.h>
@@ -249,8 +250,10 @@ namespace djv
                 SDL_Window* shuttleSDLWindow = nullptr;
                 float shuttleSDLScale = 1.F;
 #endif // FTK_SDL3
-                //! The pointer the shuttle draws in place of the system's,
+                //! Whether the shuttle draws a pointer in place of the
+                //! system's, for a remote session, and that pointer,
                 //! brought round inside the viewport.
+                bool shuttleDrawn = false;
                 ftk::V2F shuttlePointer;
                 //! For the log: how far the drag went.
                 float shuttleTravel = 0.F;
@@ -1012,19 +1015,30 @@ namespace djv
                 p.mouse.shuttleLast = event.pos;
 #if defined(FTK_SDL3)
                 // The mouse in relative mode while the button is held, as
-                // for the probe: its motion is counted however far it goes,
-                // and the system's pointer is hidden, the shuttle drawing
-                // its own, which comes back from the other side of the
-                // viewport when it reaches one, as in Blender. Hidden, not
-                // moved: a pointer driven from outside -- Parsec, a tablet --
-                // goes back where the other end puts it, and Parsec sends
-                // the mouse's own motion only while the pointer is hidden.
+                // for the probe: its motion is counted however far it goes.
                 // The motion has the system's pointer speed, so the shuttle
-                // goes as far as the pointer would.
+                // goes as far as the pointer would. The pointer comes back
+                // from the other side of the viewport when it reaches one,
+                // as in Blender.
+                //
+                // At the computer itself, that is the system's pointer,
+                // moved by the system -- a drawn one lags behind it by a
+                // frame or two -- held in the viewport, as Blender holds it
+                // in the editor it drags in, and put on the other side at an
+                // edge. Over Parsec it is hidden and the shuttle draws its
+                // own: a pointer driven from outside goes back where the
+                // other end puts it, and Parsec sends the mouse's own motion
+                // only while the pointer is hidden.
                 p.mouse.shuttlePointer = ftk::V2F(event.pos.x, event.pos.y);
+                p.mouse.shuttleDrawn = isParsecConnected();
                 if (SDL_Window* window = SDL_GetMouseFocus())
                 {
                     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "1");
+                    if (!p.mouse.shuttleDrawn)
+                    {
+                        SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_CURSOR_VISIBLE, "1");
+                        SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER, "0");
+                    }
                     // Gains of one: the counts as they come.
                     p.shuttleMotion = ProbeMotion();
                     if (SDL_SetWindowRelativeMouseMode(window, true))
@@ -1039,6 +1053,17 @@ namespace djv
                             p.mouse.shuttleSDLScale = 1.F;
                         }
                         SDL_AddEventWatch(&probeWatch, &p.shuttleMotion);
+                        if (!p.mouse.shuttleDrawn)
+                        {
+                            const ftk::Box2I& g = getGeometry();
+                            const float scale = p.mouse.shuttleSDLScale;
+                            SDL_Rect rect;
+                            rect.x = static_cast<int>(std::ceil(g.min.x / scale));
+                            rect.y = static_cast<int>(std::ceil(g.min.y / scale));
+                            rect.w = std::max(static_cast<int>(std::floor(g.w() / scale)) - 1, 1);
+                            rect.h = std::max(static_cast<int>(std::floor(g.h() / scale)) - 1, 1);
+                            SDL_SetWindowMouseRect(window, &rect);
+                        }
                         setDrawUpdate();
                     }
                     else
@@ -1046,6 +1071,8 @@ namespace djv
                         _shuttleLog(ftk::Format("Shuttle: no relative mode: {0}").
                             arg(SDL_GetError()));
                         SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE);
+                        SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_CURSOR_VISIBLE);
+                        SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER);
                     }
                 }
 #endif // FTK_SDL3
@@ -1493,7 +1520,9 @@ namespace djv
 #if defined(FTK_SDL3)
             // The shuttle's pointer, in place of the system's: a double
             // arrow, as Blender's while it scrubs, white edged with black.
-            if (Private::MouseMode::Shuttle == p.mouse.mode && p.mouse.shuttleSDLWindow)
+            if (Private::MouseMode::Shuttle == p.mouse.mode &&
+                p.mouse.shuttleSDLWindow &&
+                p.mouse.shuttleDrawn)
             {
                 const float s = event.displayScale;
                 const ftk::V2F c(
@@ -2025,7 +2054,56 @@ namespace djv
             }
 
 #if defined(FTK_SDL3)
-            if (SDL_Window* window = p.mouse.shuttleSDLWindow)
+            if (SDL_Window* window = p.mouse.shuttleSDLWindow; window && !p.mouse.shuttleDrawn)
+            {
+                // The system's pointer, moved by the system and held in the
+                // viewport: put on the other side when it reaches an edge.
+                // Moving it does not count as motion: that is the mouse's
+                // own.
+                float gx = 0.F;
+                float gy = 0.F;
+                SDL_GetGlobalMouseState(&gx, &gy);
+                int wx = 0;
+                int wy = 0;
+                SDL_GetWindowPosition(window, &wx, &wy);
+                const float scale = p.mouse.shuttleSDLScale;
+                ftk::V2I pos(
+                    static_cast<int>(std::lround((gx - wx) * scale)),
+                    static_cast<int>(std::lround((gy - wy) * scale)));
+                const ftk::Box2I& g = getGeometry();
+                const int margin = 2;
+                if (g.w() > margin * 8 && g.h() > margin * 8)
+                {
+                    ftk::V2I warp = pos;
+                    if (pos.x <= g.min.x + margin)
+                    {
+                        warp.x = g.max.x - margin - 1;
+                    }
+                    else if (pos.x >= g.max.x - margin)
+                    {
+                        warp.x = g.min.x + margin + 1;
+                    }
+                    if (pos.y <= g.min.y + margin)
+                    {
+                        warp.y = g.max.y - margin - 1;
+                    }
+                    else if (pos.y >= g.max.y - margin)
+                    {
+                        warp.y = g.min.y + margin + 1;
+                    }
+                    if (warp != pos)
+                    {
+                        SDL_WarpMouseGlobal(wx + warp.x / scale, wy + warp.y / scale);
+                        ++p.mouse.shuttleWraps;
+                        pos = warp;
+                    }
+                }
+                // SDL's idea of where the pointer is, on it: SDL puts the
+                // pointer back there when relative mode ends. In relative
+                // mode this moves nothing.
+                SDL_WarpMouseInWindow(window, pos.x / scale, pos.y / scale);
+            }
+            else if (window)
             {
                 // The pointer the shuttle draws: it follows the motion, and
                 // the one that leaves the viewport comes back from the other
@@ -2069,17 +2147,36 @@ namespace djv
             if (SDL_Window* window = p.mouse.shuttleSDLWindow)
             {
                 SDL_RemoveEventWatch(&probeWatch, &p.shuttleMotion);
-                // The system's pointer comes back where the drawn one is.
                 const float scale = p.mouse.shuttleSDLScale;
-                SDL_WarpMouseInWindow(
-                    window,
-                    p.mouse.shuttlePointer.x / scale,
-                    p.mouse.shuttlePointer.y / scale);
+                if (p.mouse.shuttleDrawn)
+                {
+                    // The system's pointer comes back where the drawn one
+                    // is.
+                    SDL_WarpMouseInWindow(
+                        window,
+                        p.mouse.shuttlePointer.x / scale,
+                        p.mouse.shuttlePointer.y / scale);
+                }
+                else
+                {
+                    // The pointer stays where it is.
+                    SDL_SetWindowMouseRect(window, nullptr);
+                    float gx = 0.F;
+                    float gy = 0.F;
+                    SDL_GetGlobalMouseState(&gx, &gy);
+                    int wx = 0;
+                    int wy = 0;
+                    SDL_GetWindowPosition(window, &wx, &wy);
+                    SDL_WarpMouseInWindow(window, gx - wx, gy - wy);
+                }
                 SDL_SetWindowRelativeMouseMode(window, false);
                 SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE);
+                SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_CURSOR_VISIBLE);
+                SDL_ResetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER);
                 p.mouse.shuttleSDLWindow = nullptr;
                 setDrawUpdate();
-                _shuttleLog(ftk::Format("Shuttle: {0} pixels, {1} wraps, {2} frames").
+                _shuttleLog(ftk::Format("Shuttle ({0} pointer): {1} pixels, {2} wraps, {3} frames").
+                    arg(p.mouse.shuttleDrawn ? "drawn" : "system").
                     arg(p.mouse.shuttleTravel, 0).
                     arg(p.mouse.shuttleWraps).
                     arg(p.mouse.shuttleOffset));

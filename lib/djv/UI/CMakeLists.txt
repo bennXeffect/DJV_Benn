@@ -25,7 +25,8 @@ set(HEADERS
     ViewWidgets.h
     Viewport.h
     ViewportBinding.h)
-set(HEADERS_PRIVATE)
+set(HEADERS_PRIVATE
+    RemoteSession.h)
 
 set(SOURCE
     AboutDialog.cpp
@@ -52,6 +53,7 @@ set(SOURCE
     MagnifyWidget.cpp
     PixelLoupe.cpp
     PixelProbe.cpp
+    RemoteSession.cpp
     ScopesWidget.cpp
     ViewWidgets.cpp
     Viewport.cpp
