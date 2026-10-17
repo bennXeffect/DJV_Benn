@@ -9,6 +9,8 @@
 
 #include <ftk/UI/Bellows.h>
 
+#include <optional>
+
 namespace djv
 {
     namespace app
@@ -51,6 +53,12 @@ namespace djv
             //! Get the geometry of the named section, or of the tool when it
             //! has no such section.
             DJV_APP_API ftk::Box2I getSectionGeometry(const std::string& section) const;
+
+            //! Get the header where the pointer holds it while the tool is
+            //! dragged by its grip, for the dock to draw it there; and the
+            //! header where the tool is.
+            DJV_APP_API std::optional<ftk::Box2I> getDragHeader() const;
+            DJV_APP_API ftk::Box2I getHeaderGeometry() const;
 
             //! Get whether the tool is collapsed to its header.
             DJV_APP_API bool isCollapsed() const;

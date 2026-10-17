@@ -11,6 +11,7 @@
 #include <optional>
 
 #include <ftk/UI/RowLayout.h>
+#include <ftk/Core/FontSystem.h>
 #include <ftk/UI/ScrollWidget.h>
 
 namespace djv
@@ -182,6 +183,52 @@ namespace djv
                     }
                     p.scrollSection.reset();
                 }
+            }
+        }
+
+        void ToolsWidget::drawOverlayEvent(const ftk::Box2I& drawRect, const ftk::DrawEvent& event)
+        {
+            IContainer::drawOverlayEvent(drawRect, event);
+            FTK_P();
+            // The header of a tool being dragged to another place, held
+            // under the pointer, over a shade where the tool is now.
+            for (const auto& child : p.layout->getChildren())
+            {
+                auto tool = std::dynamic_pointer_cast<IToolWidget>(child);
+                if (!tool)
+                    continue;
+                const auto header = tool->getDragHeader();
+                if (!header.has_value())
+                    continue;
+                const ftk::Box2I& g = getGeometry();
+                const ftk::Box2I place = tool->getHeaderGeometry();
+                ftk::Color4F shade = event.style->getColorRole(ftk::ColorRole::Base);
+                shade.a = .75F;
+                event.render->drawRect(place, shade);
+
+                ftk::Box2I box = header.value();
+                box = ftk::Box2I(
+                    box.min.x,
+                    std::clamp(box.min.y, g.min.y, std::max(g.min.y, g.max.y - box.h() + 1)),
+                    box.w(),
+                    box.h());
+                const int border = std::max(1, static_cast<int>(event.displayScale));
+                event.render->drawRect(box, event.style->getColorRole(ftk::ColorRole::KeyFocus));
+                event.render->drawRect(
+                    ftk::margin(box, -border * 2),
+                    event.style->getColorRole(ftk::ColorRole::Header));
+                const ftk::FontInfo fontInfo = event.style->getFont(ftk::FontType::Regular, event.displayScale);
+                const ftk::FontMetrics fontMetrics = event.fontSystem->getMetrics(fontInfo);
+                const int margin = event.style->getSizeRole(ftk::SizeRole::MarginInside, event.displayScale);
+                const int icon = event.style->getSizeRole(ftk::SizeRole::Icon, event.displayScale);
+                event.render->drawText(
+                    event.fontSystem->getGlyphs(tool->getToolName(), fontInfo),
+                    fontMetrics,
+                    ftk::V2I(
+                        box.min.x + margin * 3 + icon * 2,
+                        box.min.y + (box.h() - fontMetrics.lineHeight) / 2),
+                    event.style->getColorRole(ftk::ColorRole::Text));
+                break;
             }
         }
 

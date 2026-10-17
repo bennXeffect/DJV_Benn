@@ -99,6 +99,10 @@ namespace djv
             //! looked at again, or it would go on past the tool it passed.
             bool reorderDrag = false;
             bool reorderPending = false;
+            //! Where the pointer is, and how far below the top of the header
+            //! it took hold of it.
+            int dragY = 0;
+            int dragGrabY = 0;
             std::shared_ptr<ftk::HorizontalLayout> headerLayout;
             bool collapsed = false;
             //! A press on the header toggles the tool, and a drag from it
@@ -241,6 +245,20 @@ namespace djv
             return getGeometry();
         }
 
+        std::optional<ftk::Box2I> IToolWidget::getDragHeader() const
+        {
+            FTK_P();
+            if (!p.reorderDrag)
+                return std::nullopt;
+            const ftk::Box2I& g = p.headerLayout->getGeometry();
+            return ftk::Box2I(g.min.x, p.dragY - p.dragGrabY, g.w(), g.h());
+        }
+
+        ftk::Box2I IToolWidget::getHeaderGeometry() const
+        {
+            return _p->headerLayout->getGeometry();
+        }
+
         bool IToolWidget::isCollapsed() const
         {
             return _p->collapsed;
@@ -279,6 +297,9 @@ namespace djv
                 event.accept = true;
                 p.reorderDrag = true;
                 p.reorderPending = false;
+                p.dragY = event.pos.y;
+                p.dragGrabY = event.pos.y - p.headerLayout->getGeometry().min.y;
+                setDrawUpdate();
                 return;
             }
             if (ftk::MouseButton::Left == event.button &&
@@ -299,6 +320,8 @@ namespace djv
             if (p.reorderDrag)
             {
                 event.accept = true;
+                p.dragY = event.pos.y;
+                setDrawUpdate();
                 auto app = _app.lock();
                 auto parent = getParent();
                 if (p.reorderPending || !app || !parent)
@@ -382,6 +405,7 @@ namespace djv
                 p.reorderDrag = false;
                 p.reorderPending = false;
                 event.accept = true;
+                setDrawUpdate();
             }
         }
 

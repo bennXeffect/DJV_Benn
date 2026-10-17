@@ -63,6 +63,7 @@ namespace djv
             DJV_APP_API std::shared_ptr<IToolWidget> getToolWidget(const std::string&) const;
 
             DJV_APP_API void tickEvent(bool, bool, const ftk::TickEvent&) override;
+            DJV_APP_API void drawOverlayEvent(const ftk::Box2I&, const ftk::DrawEvent&) override;
 
         private:
             void _widgetUpdate();
