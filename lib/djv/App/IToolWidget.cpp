@@ -14,11 +14,73 @@
 #include <ftk/Core/Format.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace djv
 {
     namespace app
     {
+        namespace
+        {
+            //! The grip a tool is dragged by to another place in the stack:
+            //! two columns of dots, as a panel's in Blender.
+            class Grip : public ftk::IWidget
+            {
+            protected:
+                void _init(const std::shared_ptr<ftk::Context>& context)
+                {
+                    IWidget::_init(context, "djv::app::Grip", nullptr);
+                }
+
+            public:
+                static std::shared_ptr<Grip> create(const std::shared_ptr<ftk::Context>& context)
+                {
+                    auto out = std::shared_ptr<Grip>(new Grip);
+                    out->_init(context);
+                    return out;
+                }
+
+                ftk::Size2I getSizeHint() const override
+                {
+                    return _sizeHint;
+                }
+
+                void sizeHintEvent(const ftk::SizeHintEvent& event) override
+                {
+                    IWidget::sizeHintEvent(event);
+                    const int icon = event.style->getSizeRole(ftk::SizeRole::Icon, event.displayScale);
+                    const int margin = event.style->getSizeRole(ftk::SizeRole::MarginInside, event.displayScale);
+                    _sizeHint = ftk::Size2I(icon + margin * 2, icon + margin * 2);
+                }
+
+                void drawEvent(const ftk::Box2I& drawRect, const ftk::DrawEvent& event) override
+                {
+                    IWidget::drawEvent(drawRect, event);
+                    const ftk::Box2I& g = getGeometry();
+                    const int dot = std::max(2, static_cast<int>(std::lround(2.F * event.displayScale)));
+                    const int step = std::max(dot + 2, static_cast<int>(std::lround(5.F * event.displayScale)));
+                    const int w = step + dot;
+                    const int h = step * 2 + dot;
+                    const int x0 = g.min.x + (g.w() - w) / 2;
+                    const int y0 = g.min.y + (g.h() - h) / 2;
+                    ftk::Color4F color = event.style->getColorRole(ftk::ColorRole::Text);
+                    color.a = .6F;
+                    std::vector<ftk::Box2I> boxes;
+                    for (int y = 0; y < 3; ++y)
+                    {
+                        for (int x = 0; x < 2; ++x)
+                        {
+                            boxes.push_back(ftk::Box2I(x0 + x * step, y0 + y * step, dot, dot));
+                        }
+                    }
+                    event.render->drawRects(boxes, color);
+                }
+
+            private:
+                ftk::Size2I _sizeHint;
+            };
+        }
+
         struct IToolWidget::Private
         {
             std::shared_ptr<ftk::Settings> settings;
@@ -31,7 +93,12 @@ namespace djv
             std::shared_ptr<ftk::Icon> icon;
             std::shared_ptr<ftk::Label> label;
             std::shared_ptr<ftk::ToolButton> sideButton;
-            std::shared_ptr<ftk::ToolButton> closeButton;
+            std::shared_ptr<Grip> grip;
+            //! Dragged by the grip to another place in the stack. Until the
+            //! layout has put the tool where it went, its place is not
+            //! looked at again, or it would go on past the tool it passed.
+            bool reorderDrag = false;
+            bool reorderPending = false;
             std::shared_ptr<ftk::HorizontalLayout> headerLayout;
             bool collapsed = false;
             //! A press on the header toggles the tool, and a drag from it
@@ -78,9 +145,11 @@ namespace djv
             // Docked on the other side of the viewport.
             p.sideButton = ftk::ToolButton::create(context);
 
-            p.closeButton = ftk::ToolButton::create(context);
-            p.closeButton->setIcon("Close");
-            p.closeButton->setTooltip("Close the tool. Opened again, it is as it was left.");
+            // No close button: a tool is closed from the Tools menu, the
+            // tool bar or its shortcut, and opened again as it was left.
+            p.grip = Grip::create(context);
+            p.grip->setTooltip(
+                "Drag up or down to put the tool somewhere else in the stack.");
 
             p.layout = ftk::VerticalLayout::create(context, shared_from_this());
             p.layout->setSpacingRole(ftk::SizeRole::Border);
@@ -95,7 +164,7 @@ namespace djv
             p.icon->setParent(hLayout);
             p.label->setParent(hLayout);
             p.sideButton->setParent(hLayout);
-            p.closeButton->setParent(hLayout);
+            p.grip->setParent(hLayout);
             p.toolLayout = ftk::VerticalLayout::create(context, p.layout);
             p.toolLayout->setSpacingRole(ftk::SizeRole::None);
             p.toolLayout->setHStretch(ftk::Stretch::Expanding);
@@ -129,15 +198,6 @@ namespace djv
             bool collapsed = false;
             p.settings->get(ftk::Format("/{0}/Collapsed").arg(name), collapsed);
             setCollapsed(collapsed);
-
-            p.closeButton->setClickedCallback(
-                [appWeak, name]
-                {
-                    if (auto app = appWeak.lock())
-                    {
-                        app->getToolsModel()->setToolOpen(name, false);
-                    }
-                });
         }
 
         IToolWidget::IToolWidget() :
@@ -214,6 +274,15 @@ namespace djv
             // their own.
             if (ftk::MouseButton::Left == event.button &&
                 !event.accept &&
+                ftk::contains(p.grip->getGeometry(), event.pos))
+            {
+                event.accept = true;
+                p.reorderDrag = true;
+                p.reorderPending = false;
+                return;
+            }
+            if (ftk::MouseButton::Left == event.button &&
+                !event.accept &&
                 ftk::contains(p.headerLayout->getGeometry(), event.pos))
             {
                 event.accept = true;
@@ -227,6 +296,56 @@ namespace djv
         {
             IWidget::mouseMoveEvent(event);
             FTK_P();
+            if (p.reorderDrag)
+            {
+                event.accept = true;
+                auto app = _app.lock();
+                auto parent = getParent();
+                if (p.reorderPending || !app || !parent)
+                    return;
+                std::vector<std::shared_ptr<IToolWidget> > tools;
+                int index = -1;
+                for (const auto& child : parent->getChildren())
+                {
+                    if (auto tool = std::dynamic_pointer_cast<IToolWidget>(child))
+                    {
+                        if (tool.get() == this)
+                        {
+                            index = static_cast<int>(tools.size());
+                        }
+                        tools.push_back(tool);
+                    }
+                }
+                if (index < 0)
+                    return;
+                std::string other;
+                bool after = false;
+                if (index > 0 &&
+                    event.pos.y < ftk::center(tools[index - 1]->getGeometry()).y)
+                {
+                    other = tools[index - 1]->getToolName();
+                }
+                else if (index + 1 < static_cast<int>(tools.size()) &&
+                    event.pos.y > ftk::center(tools[index + 1]->getGeometry()).y)
+                {
+                    other = tools[index + 1]->getToolName();
+                    after = true;
+                }
+                if (!other.empty())
+                {
+                    auto model = app->getToolsModel();
+                    std::vector<std::string> order = model->getToolOrder();
+                    order.erase(std::remove(order.begin(), order.end(), p.name), order.end());
+                    auto i = std::find(order.begin(), order.end(), other);
+                    if (i != order.end())
+                    {
+                        order.insert(after ? i + 1 : i, p.name);
+                        p.reorderPending = true;
+                        model->setToolOrder(order);
+                    }
+                }
+                return;
+            }
             if (p.headerPressed)
             {
                 // The other tools of the dock whose header is under the
@@ -258,12 +377,20 @@ namespace djv
                 p.headerPressed = false;
                 event.accept = true;
             }
+            if (p.reorderDrag)
+            {
+                p.reorderDrag = false;
+                p.reorderPending = false;
+                event.accept = true;
+            }
         }
 
         void IToolWidget::setGeometry(const ftk::Box2I & value)
         {
             IWidget::setGeometry(value);
             _p->layout->setGeometry(value);
+            // Laid out where the drag put it.
+            _p->reorderPending = false;
         }
 
         void IToolWidget::_loadSettings(const std::map<std::string, std::shared_ptr<ftk::Bellows> >& value)

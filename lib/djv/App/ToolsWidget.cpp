@@ -211,6 +211,7 @@ namespace djv
                 }
             }
 
+            size_t index = 0;
             for (const auto& name : open)
             {
                 if (model->isToolLeft(name) != p.left)
@@ -223,11 +224,18 @@ namespace djv
                         app->getToolWidgetFactory()->createTool(
                             name, context, app, mainWindow, nullptr))).first;
                 }
-                // Reparented every time so the layout order follows the list
-                // rather than the order the widgets were made in.
+                // In the order of the list rather than the order the widgets
+                // were made in: moved where it goes rather than taken out and
+                // put back, so a tool being dragged into place keeps the
+                // drag.
                 if (i->second)
                 {
-                    i->second->setParent(p.layout);
+                    if (i->second->getParent() != p.layout)
+                    {
+                        i->second->setParent(p.layout);
+                    }
+                    p.layout->moveToIndex(i->second, index);
+                    ++index;
                 }
             }
         }

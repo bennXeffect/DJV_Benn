@@ -26,6 +26,7 @@ namespace djv
             std::vector<std::string> openSaved;
             std::shared_ptr<ftk::ObservableList<std::string> > openTools;
             std::shared_ptr<ftk::ObservableList<std::string> > leftTools;
+            std::vector<std::string> order;
             std::shared_ptr<ftk::Observable<std::pair<std::string, std::string> > > showSection;
         };
 
@@ -55,6 +56,7 @@ namespace djv
             // says nothing about which; the key moves rather than trying to
             // read the old one as a list of one.
             p.settings->get(settingsKeys::toolsOpen, p.openSaved);
+            p.settings->get(settingsKeys::toolsOrder, p.order);
             p.openTools = ftk::ObservableList<std::string>::create(_sorted(p.openSaved));
             std::vector<std::string> leftTools;
             p.settings->get(settingsKeys::toolsLeft, leftTools);
@@ -76,6 +78,7 @@ namespace djv
             FTK_P();
             p.settings->set(settingsKeys::toolsOpen, p.openTools->get());
             p.settings->set(settingsKeys::toolsLeft, p.leftTools->get());
+            p.settings->set(settingsKeys::toolsOrder, p.order);
         }
 
         std::shared_ptr<ToolsModel> ToolsModel::create(const std::shared_ptr<ftk::Settings>& settings)
@@ -187,16 +190,54 @@ namespace djv
             return _p->leftTools;
         }
 
+        std::vector<std::string> ToolsModel::getToolOrder() const
+        {
+            FTK_P();
+            // The order given, with what it does not name -- a tool added
+            // since -- after it in the order the tools are listed, and what
+            // is no tool any more left out.
+            std::vector<std::string> out;
+            for (const auto& name : p.order)
+            {
+                const bool known = std::find_if(
+                    p.tools.begin(),
+                    p.tools.end(),
+                    [&name](const ToolInfo& tool) { return tool.name == name; }) != p.tools.end();
+                if (known && std::find(out.begin(), out.end(), name) == out.end())
+                {
+                    out.push_back(name);
+                }
+            }
+            for (const auto& tool : p.tools)
+            {
+                if (std::find(out.begin(), out.end(), tool.name) == out.end())
+                {
+                    out.push_back(tool.name);
+                }
+            }
+            return out;
+        }
+
+        void ToolsModel::setToolOrder(const std::vector<std::string>& value)
+        {
+            FTK_P();
+            if (value == p.order)
+                return;
+            p.order = value;
+            p.settings->set(settingsKeys::toolsOrder, p.order);
+            p.openTools->setIfChanged(_sorted(p.openTools->get()));
+        }
+
         std::vector<std::string> ToolsModel::_sorted(
             const std::vector<std::string>& value) const
         {
             FTK_P();
             std::vector<std::string> out;
-            for (const auto& tool : p.tools)
+            for (const auto& name : getToolOrder())
             {
-                if (std::find(value.begin(), value.end(), tool.name) != value.end())
+                if (std::find(value.begin(), value.end(), name) != value.end())
                 {
-                    out.push_back(tool.name);
+                    out.push_back(name);
                 }
             }
             return out;

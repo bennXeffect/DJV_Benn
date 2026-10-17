@@ -88,6 +88,13 @@ namespace djv
             //! Observe the tools docked on the left.
             DJV_MODELS_API std::shared_ptr<ftk::IObservableList<std::string> > observeLeftTools() const;
 
+            //! Get the order the tools are stacked in: the one they were
+            //! dragged into, the rest in the order they are listed.
+            DJV_MODELS_API std::vector<std::string> getToolOrder() const;
+
+            //! Set the order the tools are stacked in.
+            DJV_MODELS_API void setToolOrder(const std::vector<std::string>&);
+
         private:
             // Kept in the order the tools are listed, and anything not in that
             // list dropped: a settings file can name a tool that no longer

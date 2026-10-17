@@ -67,6 +67,7 @@ namespace djv
                 settingsKeys::scopesHeights,
                 settingsKeys::scopesCollapsed,
                 settingsKeys::toolsLeft,
+                settingsKeys::toolsOrder,
                 settingsKeys::timeUnits,
                 settingsKeys::toolsOpen,
                 settingsKeys::viewportAlphaBlendAuto,
