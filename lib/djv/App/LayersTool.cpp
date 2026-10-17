@@ -232,8 +232,8 @@ namespace djv
                 if (!info.video.empty())
                 {
                     const ftk::ImageInfo& video = info.video.front();
-                    parts.push_back(ftk::Format("{0}x{1}").arg(video.size.w).arg(video.size.h));
-                    parts.push_back(ftk::to_string(video.type));
+                    parts.push_back(ftk::Format("Size: {0}x{1}").arg(video.size.w).arg(video.size.h));
+                    parts.push_back("Pixels: " + ftk::to_string(video.type));
                     lines.push_back(ftk::Format("Size: {0}x{1}, pixel aspect {2}").
                         arg(video.size.w).arg(video.size.h).arg(video.pixelAspectRatio, 2));
                     lines.push_back("Pixels: " + ftk::to_string(video.type));
@@ -251,7 +251,7 @@ namespace djv
                             arg(first + layer.offset).
                             arg(last + layer.offset);
                     }
-                    parts.push_back(frames);
+                    parts.push_back("Frames: " + frames);
                     lines.push_back(ftk::Format("Frames: {0}, {1} fps").
                         arg(frames).
                         arg(range.duration().rate(), 2));
@@ -274,7 +274,7 @@ namespace djv
                         std::string("the input of the color options") :
                         resolved + " (automatic)";
                 }
-                parts.push_back(colorSpace);
+                parts.push_back("Color space: " + colorSpace);
                 lines.push_back("Color space: " + colorSpace);
                 if (!info.tags.empty())
                 {
@@ -296,7 +296,7 @@ namespace djv
                         lines.push_back(tag.first + ": " + value);
                     }
                 }
-                row.second->setText(ftk::join(parts, "  \xC2\xB7  "));
+                row.second->setText(ftk::join(parts, '\n'));
                 row.second->setTooltip(ftk::join(lines, '\n'));
             }
 
@@ -416,12 +416,11 @@ namespace djv
                 }
                 colorSpaceComboBox->setCurrentIndex(csIndex);
 
-                // What the layer's file is, in a line: the Information tool
+                // What the layer's file is, a line each: the Information tool
                 // is about the stack, which says nothing of its layers. The
                 // rest, metadata and all, in the tooltip.
                 auto infoLabel = ftk::Label::create(context, rowLayout);
                 infoLabel->setTextRole(ftk::ColorRole::TextDisabled);
-                infoLabel->setElide(true);
                 p.infoLabels.push_back(std::make_pair(i, infoLabel));
                 const std::string key = layer.path.get();
                 if (p.infos.find(key) == p.infos.end() &&
