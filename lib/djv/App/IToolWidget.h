@@ -60,6 +60,7 @@ namespace djv
 
             DJV_APP_API ftk::Size2I getSizeHint() const override;
             DJV_APP_API void setGeometry(const ftk::Box2I&) override;
+            DJV_APP_API void mouseMoveEvent(ftk::MouseMoveEvent&) override;
             DJV_APP_API void mousePressEvent(ftk::MouseClickEvent&) override;
             DJV_APP_API void mouseReleaseEvent(ftk::MouseClickEvent&) override;
 

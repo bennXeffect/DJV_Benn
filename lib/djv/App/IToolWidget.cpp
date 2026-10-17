@@ -27,14 +27,18 @@ namespace djv
             // map: a shared pointer here would be a cycle.
             std::map<std::string, std::weak_ptr<ftk::Bellows> > bellows;
             
-            std::shared_ptr<ftk::ToolButton> collapseButton;
+            std::shared_ptr<ftk::Icon> collapseIcon;
             std::shared_ptr<ftk::Icon> icon;
             std::shared_ptr<ftk::Label> label;
             std::shared_ptr<ftk::ToolButton> sideButton;
             std::shared_ptr<ftk::ToolButton> closeButton;
             std::shared_ptr<ftk::HorizontalLayout> headerLayout;
             bool collapsed = false;
+            //! A press on the header toggles the tool, and a drag from it
+            //! gives each header it crosses the same state, as dragging
+            //! over the arrows of panels in Blender.
             bool headerPressed = false;
+            bool headerDragCollapsed = false;
             std::shared_ptr<ftk::ListObserver<std::string> > leftObserver;
             std::shared_ptr<ftk::VerticalLayout> toolLayout;
             std::shared_ptr<ftk::VerticalLayout> layout;
@@ -66,9 +70,10 @@ namespace djv
 
             // Collapsed to its header, as a panel in Blender: by the arrow,
             // or a click on the header itself.
-            p.collapseButton = ftk::ToolButton::create(context);
-            p.collapseButton->setIcon("BellowsOpen");
-            p.collapseButton->setTooltip("Collapse the tool to its header, or open it again.");
+            p.collapseIcon = ftk::Icon::create(context, "BellowsOpen");
+            p.collapseIcon->setTooltip(
+                "Click the header to collapse the tool to it, or to open it again. "
+                "Drag across other headers to do the same to them.");
 
             // Docked on the other side of the viewport.
             p.sideButton = ftk::ToolButton::create(context);
@@ -86,7 +91,7 @@ namespace djv
             // them, rather than the panel being one long column of controls.
             hLayout->setBackgroundRole(ftk::ColorRole::Header);
             p.headerLayout = hLayout;
-            p.collapseButton->setParent(hLayout);
+            p.collapseIcon->setParent(hLayout);
             p.icon->setParent(hLayout);
             p.label->setParent(hLayout);
             p.sideButton->setParent(hLayout);
@@ -99,12 +104,6 @@ namespace djv
             // Closes this tool rather than whatever is open: more than one
             // can be, and closing is how a tool is put away.
             auto appWeak = std::weak_ptr<App>(app);
-
-            p.collapseButton->setClickedCallback(
-                [this]
-                {
-                    setCollapsed(!_p->collapsed);
-                });
 
             p.sideButton->setClickedCallback(
                 [appWeak, name]
@@ -191,7 +190,7 @@ namespace djv
         {
             FTK_P();
             p.collapsed = value;
-            p.collapseButton->setIcon(value ? "BellowsClosed" : "BellowsOpen");
+            p.collapseIcon->setIcon(value ? "BellowsClosed" : "BellowsOpen");
             p.toolLayout->setVisible(!value);
             // Collapsed, the tool takes no more than its header.
             setVStretch(value ? ftk::Stretch::Fixed : ftk::Stretch::Expanding);
@@ -217,6 +216,34 @@ namespace djv
             {
                 event.accept = true;
                 p.headerPressed = true;
+                setCollapsed(!p.collapsed);
+                p.headerDragCollapsed = p.collapsed;
+            }
+        }
+
+        void IToolWidget::mouseMoveEvent(ftk::MouseMoveEvent& event)
+        {
+            IWidget::mouseMoveEvent(event);
+            FTK_P();
+            if (p.headerPressed)
+            {
+                // The other tools of the dock whose header is under the
+                // pointer.
+                event.accept = true;
+                if (auto parent = getParent())
+                {
+                    for (const auto& child : parent->getChildren())
+                    {
+                        auto tool = std::dynamic_pointer_cast<IToolWidget>(child);
+                        if (tool &&
+                            tool.get() != this &&
+                            tool->isCollapsed() != p.headerDragCollapsed &&
+                            ftk::contains(tool->_p->headerLayout->getGeometry(), event.pos))
+                        {
+                            tool->setCollapsed(p.headerDragCollapsed);
+                        }
+                    }
+                }
             }
         }
 
@@ -228,10 +255,6 @@ namespace djv
             {
                 p.headerPressed = false;
                 event.accept = true;
-                if (!event.cancel && ftk::contains(p.headerLayout->getGeometry(), event.pos))
-                {
-                    setCollapsed(!p.collapsed);
-                }
             }
         }
 

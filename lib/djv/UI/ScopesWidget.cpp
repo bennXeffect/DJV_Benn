@@ -312,7 +312,10 @@ namespace djv
 
             std::array<bool, 3> collapsed = { false, false, false };
             std::function<void(const std::array<bool, 3>&)> collapsedCallback;
+            //! A press on a title toggles that scope, and a drag from it
+            //! gives each title it crosses the same state.
             int titlePressed = -1;
+            bool titleDragCollapsed = false;
             //! The measurement running, one at a time; a frame that comes
             //! meanwhile is measured after it.
             std::future<ScopesResult> measuring;
@@ -795,6 +798,22 @@ namespace djv
         {
             IWidget::mouseMoveEvent(event);
             FTK_P();
+            if (p.titlePressed >= 0)
+            {
+                event.accept = true;
+                const int index = _titleAt(event.pos);
+                if (index >= 0 && p.collapsed[index] != p.titleDragCollapsed)
+                {
+                    auto collapsed = p.collapsed;
+                    collapsed[index] = p.titleDragCollapsed;
+                    setCollapsed(collapsed);
+                    if (p.collapsedCallback)
+                    {
+                        p.collapsedCallback(p.collapsed);
+                    }
+                }
+                return;
+            }
             if (p.gripDrag >= 0)
             {
                 event.accept = true;
@@ -823,6 +842,14 @@ namespace djv
                 {
                     event.accept = true;
                     p.titlePressed = titleIndex;
+                    auto collapsed = p.collapsed;
+                    collapsed[titleIndex] = !collapsed[titleIndex];
+                    p.titleDragCollapsed = collapsed[titleIndex];
+                    setCollapsed(collapsed);
+                    if (p.collapsedCallback)
+                    {
+                        p.collapsedCallback(p.collapsed);
+                    }
                     return;
                 }
                 const int grip = _gripAt(event.pos);
@@ -849,18 +876,7 @@ namespace djv
             if (p.titlePressed >= 0)
             {
                 event.accept = true;
-                const int index = p.titlePressed;
                 p.titlePressed = -1;
-                if (!event.cancel && _titleAt(event.pos) == index)
-                {
-                    auto collapsed = p.collapsed;
-                    collapsed[index] = !collapsed[index];
-                    setCollapsed(collapsed);
-                    if (p.collapsedCallback)
-                    {
-                        p.collapsedCallback(p.collapsed);
-                    }
-                }
                 return;
             }
             if (p.gripDrag >= 0)
