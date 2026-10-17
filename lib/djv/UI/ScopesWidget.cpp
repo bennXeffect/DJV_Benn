@@ -309,6 +309,10 @@ namespace djv
             int gripDrag = -1;
             float gripDragHeight = 0.F;
             int gripDragY = 0;
+
+            std::array<bool, 3> collapsed = { false, false, false };
+            std::function<void(const std::array<bool, 3>&)> collapsedCallback;
+            int titlePressed = -1;
             //! The measurement running, one at a time; a frame that comes
             //! meanwhile is measured after it.
             std::future<ScopesResult> measuring;
@@ -452,13 +456,14 @@ namespace djv
             const int line = p.size.fontMetrics.lineHeight;
             p.size.sizeHint.w = w + p.size.margin * 2;
             const int grip = std::lround(gripH * event.displayScale);
-            p.size.sizeHint.h =
-                p.size.margin * 2 +
-                (line + p.size.spacing) * 3 +
-                std::lround(p.heights[0] * event.displayScale) +
-                std::lround(p.heights[1] * event.displayScale) +
-                std::lround(p.heights[2] * event.displayScale) +
-                grip * 3;
+            p.size.sizeHint.h = p.size.margin * 2 + (line + p.size.spacing) * 3;
+            for (size_t i = 0; i < 3; ++i)
+            {
+                if (!p.collapsed[i])
+                {
+                    p.size.sizeHint.h += std::lround(p.heights[i] * event.displayScale) + grip;
+                }
+            }
         }
 
         void ScopesWidget::tickEvent(
@@ -522,12 +527,39 @@ namespace djv
             const std::string sourceLabel = ScopesSource::Display == p.source ?
                 " (display)" : " (file values)";
             int y = g.min.y;
-            const auto title = [&](const std::string& text)
+            const auto title = [&](int index, const std::string& text)
             {
+                // A triangle pointing down when open, right when collapsed,
+                // as a section of the tools has.
+                const float a = line * .3F;
+                const ftk::V2F c(g.min.x + line * .5F, y + line * .5F);
+                ftk::TriMesh2F mesh;
+                if (p.collapsed[index])
+                {
+                    mesh.v = {
+                        ftk::V2F(c.x - a * .6F, c.y - a),
+                        ftk::V2F(c.x + a * .8F, c.y),
+                        ftk::V2F(c.x - a * .6F, c.y + a) };
+                }
+                else
+                {
+                    mesh.v = {
+                        ftk::V2F(c.x - a, c.y - a * .6F),
+                        ftk::V2F(c.x + a, c.y - a * .6F),
+                        ftk::V2F(c.x, c.y + a * .8F) };
+                }
+                ftk::Triangle2 t;
+                t.v[0].v = 1;
+                t.v[1].v = 2;
+                t.v[2].v = 3;
+                mesh.triangles.push_back(t);
+                std::swap(t.v[1].v, t.v[2].v);
+                mesh.triangles.push_back(t);
+                event.render->drawMesh(mesh, textColor);
                 event.render->drawText(
                     event.fontSystem->getGlyphs(text, p.size.fontInfo),
                     p.size.fontMetrics,
-                    ftk::V2I(g.min.x, y),
+                    ftk::V2I(g.min.x + line, y),
                     textColor);
                 y += line + p.size.spacing;
             };
@@ -551,81 +583,91 @@ namespace djv
 
             // Histogram.
             y = boxes[0].min.y - line - p.size.spacing;
-            title("Histogram" + sourceLabel);
-            ftk::Box2I box = boxes[0];
-            event.render->drawRect(box, bgColor);
-            for (int i = 1; i < 4; ++i)
+            title(0, "Histogram" + sourceLabel);
+            ftk::Box2I box;
+            if (!p.collapsed[0])
             {
-                const int x = box.min.x + box.w() * i / 4;
-                event.render->drawRect(ftk::Box2I(x, box.min.y, p.size.border, box.h()), gridColor);
+                box = boxes[0];
+                event.render->drawRect(box, bgColor);
+                for (int i = 1; i < 4; ++i)
+                {
+                    const int x = box.min.x + box.w() * i / 4;
+                    event.render->drawRect(ftk::Box2I(x, box.min.y, p.size.border, box.h()), gridColor);
+                }
+                if (p.histogram)
+                {
+                    event.render->drawImage(p.histogram, box, ftk::Color4F(1.F, 1.F, 1.F), imageOptions);
+                }
+                grip(0, box);
             }
-            if (p.histogram)
-            {
-                event.render->drawImage(p.histogram, box, ftk::Color4F(1.F, 1.F, 1.F), imageOptions);
-            }
-            grip(0, box);
 
             // Waveform.
             y = boxes[1].min.y - line - p.size.spacing;
-            title("Waveform" + sourceLabel);
-            box = boxes[1];
-            event.render->drawRect(box, bgColor);
-            for (int i = 1; i < 4; ++i)
+            title(1, "Waveform" + sourceLabel);
+            if (!p.collapsed[1])
             {
-                const int yy = box.min.y + box.h() * i / 4;
-                event.render->drawRect(ftk::Box2I(box.min.x, yy, box.w(), p.size.border), gridColor);
+                box = boxes[1];
+                event.render->drawRect(box, bgColor);
+                for (int i = 1; i < 4; ++i)
+                {
+                    const int yy = box.min.y + box.h() * i / 4;
+                    event.render->drawRect(ftk::Box2I(box.min.x, yy, box.w(), p.size.border), gridColor);
+                }
+                if (p.waveform)
+                {
+                    event.render->drawImage(p.waveform, box, ftk::Color4F(1.F, 1.F, 1.F), imageOptions);
+                }
+                grip(1, box);
             }
-            if (p.waveform)
-            {
-                event.render->drawImage(p.waveform, box, ftk::Color4F(1.F, 1.F, 1.F), imageOptions);
-            }
-            grip(1, box);
 
             // Vectorscope, square and centered.
             y = boxes[2].min.y - line - p.size.spacing;
-            title("Vectorscope" + sourceLabel);
-            const int s = boxes[2].h();
-            box = ftk::Box2I(g.min.x + (g.w() - s) / 2, boxes[2].min.y, s, s);
-            grip(2, boxes[2]);
-            event.render->drawRect(box, bgColor);
-            const ftk::V2F c(box.min.x + s / 2.F, box.min.y + s / 2.F);
-            const float r = s / 2.F - 1.F;
-            std::vector<std::pair<ftk::V2F, ftk::V2F> > lines;
-            const int segments = 64;
-            for (int i = 0; i < segments; ++i)
+            title(2, "Vectorscope" + sourceLabel);
+            if (!p.collapsed[2])
             {
-                const float a0 = i / static_cast<float>(segments) * 6.2831853F;
-                const float a1 = (i + 1) / static_cast<float>(segments) * 6.2831853F;
-                lines.push_back(std::make_pair(
-                    ftk::V2F(c.x + std::cos(a0) * r, c.y + std::sin(a0) * r),
-                    ftk::V2F(c.x + std::cos(a1) * r, c.y + std::sin(a1) * r)));
-            }
-            lines.push_back(std::make_pair(ftk::V2F(c.x - r, c.y), ftk::V2F(c.x + r, c.y)));
-            lines.push_back(std::make_pair(ftk::V2F(c.x, c.y - r), ftk::V2F(c.x, c.y + r)));
-            event.render->drawLines(lines, gridColor);
-            if (p.vectorscope)
-            {
-                event.render->drawImage(p.vectorscope, box, ftk::Color4F(1.F, 1.F, 1.F), imageOptions);
-            }
-            // The targets of the primaries and secondaries at full
-            // saturation, where a pure color of each lands.
-            const struct
-            {
-                float r, g, b;
-            } targets[] =
-            {
-                { 1.F, 0.F, 0.F }, { 1.F, 1.F, 0.F }, { 0.F, 1.F, 0.F },
-                { 0.F, 1.F, 1.F }, { 0.F, 0.F, 1.F }, { 1.F, 0.F, 1.F }
-            };
-            for (const auto& t : targets)
-            {
-                const float cb = -.1146F * t.r - .3854F * t.g + .5F * t.b;
-                const float cr = .5F * t.r - .4542F * t.g - .0458F * t.b;
-                const ftk::V2F pos(c.x + cb * 2.F * r, c.y - cr * 2.F * r);
-                const float h = 3.F * event.displayScale;
-                event.render->drawRect(
-                    ftk::Box2F(pos.x - h, pos.y - h, h * 2.F, h * 2.F),
-                    ftk::Color4F(t.r, t.g, t.b, .8F));
+                const int s = boxes[2].h();
+                box = ftk::Box2I(g.min.x + (g.w() - s) / 2, boxes[2].min.y, s, s);
+                grip(2, boxes[2]);
+                event.render->drawRect(box, bgColor);
+                const ftk::V2F c(box.min.x + s / 2.F, box.min.y + s / 2.F);
+                const float r = s / 2.F - 1.F;
+                std::vector<std::pair<ftk::V2F, ftk::V2F> > lines;
+                const int segments = 64;
+                for (int i = 0; i < segments; ++i)
+                {
+                    const float a0 = i / static_cast<float>(segments) * 6.2831853F;
+                    const float a1 = (i + 1) / static_cast<float>(segments) * 6.2831853F;
+                    lines.push_back(std::make_pair(
+                        ftk::V2F(c.x + std::cos(a0) * r, c.y + std::sin(a0) * r),
+                        ftk::V2F(c.x + std::cos(a1) * r, c.y + std::sin(a1) * r)));
+                }
+                lines.push_back(std::make_pair(ftk::V2F(c.x - r, c.y), ftk::V2F(c.x + r, c.y)));
+                lines.push_back(std::make_pair(ftk::V2F(c.x, c.y - r), ftk::V2F(c.x, c.y + r)));
+                event.render->drawLines(lines, gridColor);
+                if (p.vectorscope)
+                {
+                    event.render->drawImage(p.vectorscope, box, ftk::Color4F(1.F, 1.F, 1.F), imageOptions);
+                }
+                // The targets of the primaries and secondaries at full
+                // saturation, where a pure color of each lands.
+                const struct
+                {
+                    float r, g, b;
+                } targets[] =
+                {
+                    { 1.F, 0.F, 0.F }, { 1.F, 1.F, 0.F }, { 0.F, 1.F, 0.F },
+                    { 0.F, 1.F, 1.F }, { 0.F, 0.F, 1.F }, { 1.F, 0.F, 1.F }
+                };
+                for (const auto& t : targets)
+                {
+                    const float cb = -.1146F * t.r - .3854F * t.g + .5F * t.b;
+                    const float cr = .5F * t.r - .4542F * t.g - .0458F * t.b;
+                    const ftk::V2F pos(c.x + cb * 2.F * r, c.y - cr * 2.F * r);
+                    const float h = 3.F * event.displayScale;
+                    event.render->drawRect(
+                        ftk::Box2F(pos.x - h, pos.y - h, h * 2.F, h * 2.F),
+                        ftk::Color4F(t.r, t.g, t.b, .8F));
+                }
             }
         }
 
@@ -649,6 +691,42 @@ namespace djv
             _p->heightsCallback = value;
         }
 
+        void ScopesWidget::setCollapsed(const std::array<bool, 3>& value)
+        {
+            FTK_P();
+            if (value == p.collapsed)
+                return;
+            p.collapsed = value;
+            p.gripHover = -1;
+            setSizeUpdate();
+            setDrawUpdate();
+        }
+
+        void ScopesWidget::setCollapsedCallback(const std::function<void(const std::array<bool, 3>&)>& value)
+        {
+            _p->collapsedCallback = value;
+        }
+
+        int ScopesWidget::_titleAt(const ftk::V2I& pos) const
+        {
+            FTK_P();
+            const auto boxes = _boxes();
+            const int line = p.size.fontMetrics.lineHeight;
+            for (int i = 0; i < 3; ++i)
+            {
+                const ftk::Box2I box(
+                    boxes[i].min.x,
+                    boxes[i].min.y - line - p.size.spacing,
+                    boxes[i].w(),
+                    line + p.size.spacing);
+                if (ftk::contains(box, pos))
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
         std::array<ftk::Box2I, 3> ScopesWidget::_boxes() const
         {
             FTK_P();
@@ -664,6 +742,11 @@ namespace djv
             for (size_t i = 0; i < 3; ++i)
             {
                 y += line + p.size.spacing;
+                if (p.collapsed[i])
+                {
+                    out[i] = ftk::Box2I(g.min.x, y, g.w(), 0);
+                    continue;
+                }
                 int h = std::lround(p.heights[i] * scale);
                 if (2 == i)
                 {
@@ -682,6 +765,8 @@ namespace djv
             const int grip = std::lround(gripH * p.size.displayScale);
             for (int i = 0; i < 3; ++i)
             {
+                if (p.collapsed[i])
+                    continue;
                 const ftk::Box2I box(
                     boxes[i].min.x,
                     boxes[i].max.y - grip / 2,
@@ -733,6 +818,13 @@ namespace djv
             FTK_P();
             if (ftk::MouseButton::Left == event.button)
             {
+                const int titleIndex = _titleAt(event.pos);
+                if (titleIndex >= 0)
+                {
+                    event.accept = true;
+                    p.titlePressed = titleIndex;
+                    return;
+                }
                 const int grip = _gripAt(event.pos);
                 if (grip >= 0)
                 {
@@ -754,6 +846,23 @@ namespace djv
         {
             IWidget::mouseReleaseEvent(event);
             FTK_P();
+            if (p.titlePressed >= 0)
+            {
+                event.accept = true;
+                const int index = p.titlePressed;
+                p.titlePressed = -1;
+                if (!event.cancel && _titleAt(event.pos) == index)
+                {
+                    auto collapsed = p.collapsed;
+                    collapsed[index] = !collapsed[index];
+                    setCollapsed(collapsed);
+                    if (p.collapsedCallback)
+                    {
+                        p.collapsedCallback(p.collapsed);
+                    }
+                }
+                return;
+            }
             if (p.gripDrag >= 0)
             {
                 event.accept = true;

@@ -387,6 +387,8 @@ namespace djv
             bool tools = true;
             float splitter = .7F;
             float splitter2 = .7F;
+            //! The left tools' share of the viewport's side.
+            float splitter3 = .25F;
 
             bool operator == (const WindowSettings&) const = default;
         };

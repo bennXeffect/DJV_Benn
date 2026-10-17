@@ -21,12 +21,12 @@ namespace djv
         {
             std::weak_ptr<App> app;
             std::weak_ptr<MainWindow> mainWindow;
-            // Kept by name so that opening a second tool does not take the
-            // first one apart and build it again.
-            std::map<std::string, std::shared_ptr<IToolWidget> > toolWidgets;
+            bool left = false;
+            std::shared_ptr<ToolWidgetCache> cache;
             std::shared_ptr<ftk::VerticalLayout> layout;
             std::shared_ptr<ftk::ScrollWidget> scrollWidget;
             std::shared_ptr<ftk::ListObserver<std::string> > openObserver;
+            std::shared_ptr<ftk::ListObserver<std::string> > leftObserver;
             std::shared_ptr<ftk::Observer<std::pair<std::string, std::string> > > showSectionObserver;
 
             // The section to scroll to, and the ticks left to wait for the
@@ -39,6 +39,8 @@ namespace djv
             const std::shared_ptr<ftk::Context>& context,
             const std::shared_ptr<App>& app,
             const std::shared_ptr<MainWindow>& mainWindow,
+            bool left,
+            const std::shared_ptr<ToolWidgetCache>& cache,
             const std::shared_ptr<IWidget>& parent)
         {
             IWidget::_init(
@@ -49,6 +51,8 @@ namespace djv
 
             p.app = app;
             p.mainWindow = mainWindow;
+            p.left = left;
+            p.cache = cache;
 
             p.layout = ftk::VerticalLayout::create(context);
             p.layout->setMarginRole(ftk::SizeRole::None);
@@ -72,9 +76,15 @@ namespace djv
 
             p.openObserver = ftk::ListObserver<std::string>::create(
                 app->getToolsModel()->observeOpenTools(),
-                [this](const std::vector<std::string>& value)
+                [this](const std::vector<std::string>&)
                 {
-                    _widgetUpdate(value);
+                    _widgetUpdate();
+                });
+            p.leftObserver = ftk::ListObserver<std::string>::create(
+                app->getToolsModel()->observeLeftTools(),
+                [this](const std::vector<std::string>&)
+                {
+                    _widgetUpdate();
                 });
 
             // The tool is opened before the section is asked for, so its
@@ -108,10 +118,12 @@ namespace djv
             const std::shared_ptr<ftk::Context>& context,
             const std::shared_ptr<App>& app,
             const std::shared_ptr<MainWindow>& mainWindow,
+            bool left,
+            const std::shared_ptr<ToolWidgetCache>& cache,
             const std::shared_ptr<IWidget>& parent)
         {
             auto out = std::shared_ptr<ToolsWidget>(new ToolsWidget);
-            out->_init(context, app, mainWindow, parent);
+            out->_init(context, app, mainWindow, left, cache, parent);
             return out;
         }
 
@@ -119,8 +131,33 @@ namespace djv
             const std::string& name) const
         {
             FTK_P();
-            const auto i = p.toolWidgets.find(name);
-            return i != p.toolWidgets.end() ? i->second : nullptr;
+            // Only an open tool, and only one docked here.
+            auto app = p.app.lock();
+            if (!app ||
+                !app->getToolsModel()->isToolOpen(name) ||
+                app->getToolsModel()->isToolLeft(name) != p.left)
+            {
+                return nullptr;
+            }
+            const auto i = p.cache->widgets.find(name);
+            return i != p.cache->widgets.end() ? i->second : nullptr;
+        }
+
+        bool ToolsWidget::hasTools() const
+        {
+            FTK_P();
+            if (auto app = p.app.lock())
+            {
+                const auto model = app->getToolsModel();
+                for (const auto& name : model->getOpenTools())
+                {
+                    if (model->isToolLeft(name) == p.left)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         void ToolsWidget::tickEvent(
@@ -148,40 +185,50 @@ namespace djv
             }
         }
 
-        void ToolsWidget::_widgetUpdate(const std::vector<std::string>& open)
+        void ToolsWidget::_widgetUpdate()
         {
             FTK_P();
-
-            // Take apart only what is no longer open.
-            for (auto i = p.toolWidgets.begin(); i != p.toolWidgets.end(); )
-            {
-                if (std::find(open.begin(), open.end(), i->first) == open.end())
-                {
-                    i->second->setParent(nullptr);
-                    i = p.toolWidgets.erase(i);
-                }
-                else
-                {
-                    ++i;
-                }
-            }
-
             auto context = getContext();
             auto app = p.app.lock();
             auto mainWindow = p.mainWindow.lock();
+            if (!context || !app)
+                return;
+            const auto model = app->getToolsModel();
+            const auto& open = model->getOpenTools();
+
+            // Out of this dock what is closed or docked on the other side.
+            // Kept, not taken apart: opened again it is as it was left.
+            for (const auto& child : p.layout->getChildren())
+            {
+                if (auto tool = std::dynamic_pointer_cast<IToolWidget>(child))
+                {
+                    const std::string& name = tool->getToolName();
+                    if (std::find(open.begin(), open.end(), name) == open.end() ||
+                        model->isToolLeft(name) != p.left)
+                    {
+                        tool->setParent(nullptr);
+                    }
+                }
+            }
+
             for (const auto& name : open)
             {
-                auto i = p.toolWidgets.find(name);
-                if (i == p.toolWidgets.end())
+                if (model->isToolLeft(name) != p.left)
+                    continue;
+                auto i = p.cache->widgets.find(name);
+                if (i == p.cache->widgets.end())
                 {
-                    i = p.toolWidgets.insert(std::make_pair(
+                    i = p.cache->widgets.insert(std::make_pair(
                         name,
                         app->getToolWidgetFactory()->createTool(
                             name, context, app, mainWindow, nullptr))).first;
                 }
                 // Reparented every time so the layout order follows the list
                 // rather than the order the widgets were made in.
-                i->second->setParent(p.layout);
+                if (i->second)
+                {
+                    i->second->setParent(p.layout);
+                }
             }
         }
     }

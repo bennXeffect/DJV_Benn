@@ -13,6 +13,8 @@
 #include <ftk/UI/Settings.h>
 #include <ftk/Core/Format.h>
 
+#include <algorithm>
+
 namespace djv
 {
     namespace app
@@ -25,9 +27,15 @@ namespace djv
             // map: a shared pointer here would be a cycle.
             std::map<std::string, std::weak_ptr<ftk::Bellows> > bellows;
             
+            std::shared_ptr<ftk::ToolButton> collapseButton;
             std::shared_ptr<ftk::Icon> icon;
             std::shared_ptr<ftk::Label> label;
+            std::shared_ptr<ftk::ToolButton> sideButton;
             std::shared_ptr<ftk::ToolButton> closeButton;
+            std::shared_ptr<ftk::HorizontalLayout> headerLayout;
+            bool collapsed = false;
+            bool headerPressed = false;
+            std::shared_ptr<ftk::ListObserver<std::string> > leftObserver;
             std::shared_ptr<ftk::VerticalLayout> toolLayout;
             std::shared_ptr<ftk::VerticalLayout> layout;
         };
@@ -56,8 +64,18 @@ namespace djv
             p.label->setMarginRole(ftk::SizeRole::LabelPad, ftk::SizeRole::None);
             p.label->setHStretch(ftk::Stretch::Expanding);
 
+            // Collapsed to its header, as a panel in Blender: by the arrow,
+            // or a click on the header itself.
+            p.collapseButton = ftk::ToolButton::create(context);
+            p.collapseButton->setIcon("BellowsOpen");
+            p.collapseButton->setTooltip("Collapse the tool to its header, or open it again.");
+
+            // Docked on the other side of the viewport.
+            p.sideButton = ftk::ToolButton::create(context);
+
             p.closeButton = ftk::ToolButton::create(context);
             p.closeButton->setIcon("Close");
+            p.closeButton->setTooltip("Close the tool. Opened again, it is as it was left.");
 
             p.layout = ftk::VerticalLayout::create(context, shared_from_this());
             p.layout->setSpacingRole(ftk::SizeRole::Border);
@@ -67,8 +85,11 @@ namespace djv
             // Coloured so that each tool reads as its own thing in a stack of
             // them, rather than the panel being one long column of controls.
             hLayout->setBackgroundRole(ftk::ColorRole::Header);
+            p.headerLayout = hLayout;
+            p.collapseButton->setParent(hLayout);
             p.icon->setParent(hLayout);
             p.label->setParent(hLayout);
+            p.sideButton->setParent(hLayout);
             p.closeButton->setParent(hLayout);
             p.toolLayout = ftk::VerticalLayout::create(context, p.layout);
             p.toolLayout->setSpacingRole(ftk::SizeRole::None);
@@ -78,6 +99,38 @@ namespace djv
             // Closes this tool rather than whatever is open: more than one
             // can be, and closing is how a tool is put away.
             auto appWeak = std::weak_ptr<App>(app);
+
+            p.collapseButton->setClickedCallback(
+                [this]
+                {
+                    setCollapsed(!_p->collapsed);
+                });
+
+            p.sideButton->setClickedCallback(
+                [appWeak, name]
+                {
+                    if (auto app = appWeak.lock())
+                    {
+                        auto model = app->getToolsModel();
+                        model->setToolLeft(name, !model->isToolLeft(name));
+                    }
+                });
+            p.leftObserver = ftk::ListObserver<std::string>::create(
+                app->getToolsModel()->observeLeftTools(),
+                [this, name](const std::vector<std::string>& value)
+                {
+                    const bool left = std::find(value.begin(), value.end(), name) != value.end();
+                    _p->sideButton->setIcon(left ? "PanelRight" : "PanelLeft");
+                    _p->sideButton->setTooltip(left ?
+                        "Dock the tool on the right of the viewport." :
+                        "Dock the tool on the left of the viewport.");
+                });
+
+            // Collapsed or not as it was last.
+            bool collapsed = false;
+            p.settings->get(ftk::Format("/{0}/Collapsed").arg(name), collapsed);
+            setCollapsed(collapsed);
+
             p.closeButton->setClickedCallback(
                 [appWeak, name]
                 {
@@ -129,9 +182,57 @@ namespace djv
             return getGeometry();
         }
 
+        bool IToolWidget::isCollapsed() const
+        {
+            return _p->collapsed;
+        }
+
+        void IToolWidget::setCollapsed(bool value)
+        {
+            FTK_P();
+            p.collapsed = value;
+            p.collapseButton->setIcon(value ? "BellowsClosed" : "BellowsOpen");
+            p.toolLayout->setVisible(!value);
+            // Collapsed, the tool takes no more than its header.
+            setVStretch(value ? ftk::Stretch::Fixed : ftk::Stretch::Expanding);
+            p.settings->set(ftk::Format("/{0}/Collapsed").arg(p.name), value);
+            setSizeUpdate();
+            setDrawUpdate();
+        }
+
         ftk::Size2I IToolWidget::getSizeHint() const
         {
             return _p->layout->getSizeHint();
+        }
+
+        void IToolWidget::mousePressEvent(ftk::MouseClickEvent& event)
+        {
+            IWidget::mousePressEvent(event);
+            FTK_P();
+            // A click on the header, not on one of its buttons, which take
+            // their own.
+            if (ftk::MouseButton::Left == event.button &&
+                !event.accept &&
+                ftk::contains(p.headerLayout->getGeometry(), event.pos))
+            {
+                event.accept = true;
+                p.headerPressed = true;
+            }
+        }
+
+        void IToolWidget::mouseReleaseEvent(ftk::MouseClickEvent& event)
+        {
+            IWidget::mouseReleaseEvent(event);
+            FTK_P();
+            if (p.headerPressed)
+            {
+                p.headerPressed = false;
+                event.accept = true;
+                if (!event.cancel && ftk::contains(p.headerLayout->getGeometry(), event.pos))
+                {
+                    setCollapsed(!p.collapsed);
+                }
+            }
         }
 
         void IToolWidget::setGeometry(const ftk::Box2I & value)

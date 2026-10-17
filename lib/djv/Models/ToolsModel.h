@@ -78,6 +78,16 @@ namespace djv
             //! Observe requests to show a section, as the tool and the section.
             DJV_MODELS_API std::shared_ptr<ftk::IObservable<std::pair<std::string, std::string> > > observeShowSection() const;
 
+            //! Get whether a tool is docked on the left of the viewport
+            //! rather than the right.
+            DJV_MODELS_API bool isToolLeft(const std::string&) const;
+
+            //! Dock a tool on the left of the viewport or the right.
+            DJV_MODELS_API void setToolLeft(const std::string&, bool);
+
+            //! Observe the tools docked on the left.
+            DJV_MODELS_API std::shared_ptr<ftk::IObservableList<std::string> > observeLeftTools() const;
+
         private:
             // Kept in the order the tools are listed, and anything not in that
             // list dropped: a settings file can name a tool that no longer

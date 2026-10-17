@@ -72,6 +72,8 @@ namespace djv
             constexpr const char* informationBellows = "/Information/Bellows";
             constexpr const char* magnifyLevel = "/Magnify/Level";
             constexpr const char* scopesHeights = "/Scopes/Heights";
+            constexpr const char* scopesCollapsed = "/Scopes/Collapsed";
+            constexpr const char* toolsLeft = "/Tools/Left";
             constexpr const char* magnifyViewPosAndZoom = "/Magnify/ViewPosAndZoom";
             constexpr const char* timeUnits = "/TimeUnits";
             constexpr const char* toolsOpen = "/Tools/Open.1";

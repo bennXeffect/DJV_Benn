@@ -154,12 +154,15 @@ namespace djv
             std::shared_ptr<BottomToolBar> bottomToolBar;
             std::shared_ptr<StatusBar> statusBar;
             std::shared_ptr<ToolsWidget> toolsWidget;
+            std::shared_ptr<ToolsWidget> leftToolsWidget;
+            std::shared_ptr<ToolWidgetCache> toolWidgetCache;
             std::shared_ptr<ui::SetupDialog> setupDialog;
             std::shared_ptr<ui::AboutDialog> aboutDialog;
             std::shared_ptr<ui::SysInfoDialog> sysInfoDialog;
             std::shared_ptr<ftk::HorizontalLayout> toolBarLayout;
             std::shared_ptr<ftk::Splitter> splitter;
             std::shared_ptr<ftk::Splitter> splitter2;
+            std::shared_ptr<ftk::Splitter> splitter3;
             std::shared_ptr<ftk::VerticalLayout> splitterLayout;
             std::shared_ptr<ftk::VerticalLayout> layout;
 
@@ -169,6 +172,7 @@ namespace djv
             std::shared_ptr<ftk::Observer<tl::LUTOptions> > lutOptionsObserver;
             std::shared_ptr<ftk::Observer<ftk::ImageType> > colorBufferObserver;
             std::shared_ptr<ftk::ListObserver<std::string> > openToolsObserver;
+            std::shared_ptr<ftk::ListObserver<std::string> > leftToolsObserver;
             std::shared_ptr<ftk::Observer<std::pair<std::string, std::string> > > showSectionObserver;
             std::shared_ptr<ftk::Observer<models::MouseSettings> > mouseSettingsObserver;
             std::shared_ptr<ftk::Observer<models::TimelineSettings> > timelineSettingsObserver;
@@ -381,11 +385,23 @@ namespace djv
                     }
                 });
 
+            // A dock on each side of the viewport, sharing the tools, so a
+            // tool moved across is the one that was there.
+            p.toolWidgetCache = std::make_shared<ToolWidgetCache>();
             p.toolsWidget = ToolsWidget::create(
                 context,
                 app,
-                std::dynamic_pointer_cast<MainWindow>(shared_from_this()));
+                std::dynamic_pointer_cast<MainWindow>(shared_from_this()),
+                false,
+                p.toolWidgetCache);
             ftk::setScreenshotTag(p.toolsWidget, "MainWindow.Tools");
+            p.leftToolsWidget = ToolsWidget::create(
+                context,
+                app,
+                std::dynamic_pointer_cast<MainWindow>(shared_from_this()),
+                true,
+                p.toolWidgetCache);
+            ftk::setScreenshotTag(p.leftToolsWidget, "MainWindow.LeftTools");
 
             p.layout = ftk::VerticalLayout::create(context, shared_from_this());
             p.layout->setSpacingRole(ftk::SizeRole::None);
@@ -426,7 +442,11 @@ namespace djv
             p.splitter2 = ftk::Splitter::create(context, ftk::Orientation::Horizontal, p.splitter);
             p.splitter2->setSplit(settings.splitter2);
             p.splitter2->setBorder(false);
-            auto vLayout = ftk::VerticalLayout::create(context, p.splitter2);
+            p.splitter3 = ftk::Splitter::create(context, ftk::Orientation::Horizontal, p.splitter2);
+            p.splitter3->setSplit(settings.splitter3);
+            p.splitter3->setBorder(false);
+            p.leftToolsWidget->setParent(p.splitter3);
+            auto vLayout = ftk::VerticalLayout::create(context, p.splitter3);
             vLayout->setSpacingRole(ftk::SizeRole::None);
             p.tabBar->setParent(vLayout);
             p.viewport->setParent(vLayout);
@@ -499,6 +519,8 @@ namespace djv
             // The Tools panel is a band of its own.
             p.toolsWidget->setContextMenuCallback(
                 chromeMenuCallback(context, p.windowActions, { "Tools" }));
+            p.leftToolsWidget->setContextMenuCallback(
+                chromeMenuCallback(context, p.windowActions, { "Tools" }));
 
             // Unless the application has something to settle first, which
             // then shows it itself (App::isSetupReady()).
@@ -568,6 +590,12 @@ namespace djv
 
             p.openToolsObserver = ftk::ListObserver<std::string>::create(
                 app->getToolsModel()->observeOpenTools(),
+                [this](const std::vector<std::string>&)
+                {
+                    _windowUpdate();
+                });
+            p.leftToolsObserver = ftk::ListObserver<std::string>::create(
+                app->getToolsModel()->observeLeftTools(),
                 [this](const std::vector<std::string>&)
                 {
                     _windowUpdate();
@@ -672,6 +700,7 @@ namespace djv
                 settings.maximized = isMaximized();
                 settings.splitter = p.splitter->getSplit();
                 settings.splitter2 = p.splitter2->getSplit();
+                settings.splitter3 = p.splitter3->getSplit();
                 p.settingsModel->setWindow(settings);
             }
         }
@@ -751,7 +780,12 @@ namespace djv
         std::shared_ptr<IToolWidget> MainWindow::getToolWidget(
             const std::string& name) const
         {
-            return _p->toolsWidget->getToolWidget(name);
+            FTK_P();
+            if (auto out = p.toolsWidget->getToolWidget(name))
+            {
+                return out;
+            }
+            return p.leftToolsWidget->getToolWidget(name);
         }
 
         void MainWindow::setSplitters(float splitter, float splitter2)
@@ -1206,7 +1240,11 @@ namespace djv
 
                 p.toolsWidget->setVisible(
                     settings.tools &&
-                    !app->getToolsModel()->getOpenTools().empty() &&
+                    p.toolsWidget->hasTools() &&
+                    !presentMode);
+                p.leftToolsWidget->setVisible(
+                    settings.tools &&
+                    p.leftToolsWidget->hasTools() &&
                     !presentMode);
 
                 // With nothing open the timeline has nothing to show.

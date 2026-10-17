@@ -1087,7 +1087,8 @@ namespace djv
                 { "StatusToolBar", in.statusToolBar },
                 { "Tools", in.tools },
                 { "Splitter", in.splitter },
-                { "Splitter2", in.splitter2 }
+                { "Splitter2", in.splitter2 },
+                { "Splitter3", in.splitter3 }
             };
         }
 
@@ -1359,6 +1360,10 @@ namespace djv
             }
             json.at("Splitter").get_to(value.splitter);
             json.at("Splitter2").get_to(value.splitter2);
+            if (json.contains("Splitter3"))
+            {
+                json.at("Splitter3").get_to(value.splitter3);
+            }
         }
     }
 }

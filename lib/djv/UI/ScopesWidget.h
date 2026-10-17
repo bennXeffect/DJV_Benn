@@ -78,6 +78,13 @@ namespace djv
             //! Set the callback for when a height is dragged.
             DJV_UI_API void setHeightsCallback(const std::function<void(const std::array<float, 3>&)>&);
 
+            //! Set which of the histogram, the waveform and the vectorscope
+            //! are collapsed to their titles; a click on a title toggles it.
+            DJV_UI_API void setCollapsed(const std::array<bool, 3>&);
+
+            //! Set the callback for when a scope is collapsed or opened.
+            DJV_UI_API void setCollapsedCallback(const std::function<void(const std::array<bool, 3>&)>&);
+
             DJV_UI_API ftk::Size2I getSizeHint() const override;
             DJV_UI_API void setGeometry(const ftk::Box2I&) override;
             DJV_UI_API void sizeHintEvent(const ftk::SizeHintEvent&) override;
@@ -92,6 +99,7 @@ namespace djv
             void _processorUpdate();
             std::array<ftk::Box2I, 3> _boxes() const;
             int _gripAt(const ftk::V2I&) const;
+            int _titleAt(const ftk::V2I&) const;
 
             FTK_PRIVATE();
         };

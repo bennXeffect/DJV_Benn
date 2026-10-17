@@ -52,8 +52,16 @@ namespace djv
             //! has no such section.
             DJV_APP_API ftk::Box2I getSectionGeometry(const std::string& section) const;
 
+            //! Get whether the tool is collapsed to its header.
+            DJV_APP_API bool isCollapsed() const;
+
+            //! Collapse the tool to its header, or open it again.
+            DJV_APP_API void setCollapsed(bool);
+
             DJV_APP_API ftk::Size2I getSizeHint() const override;
             DJV_APP_API void setGeometry(const ftk::Box2I&) override;
+            DJV_APP_API void mousePressEvent(ftk::MouseClickEvent&) override;
+            DJV_APP_API void mouseReleaseEvent(ftk::MouseClickEvent&) override;
 
         protected:
             void _loadSettings(const std::map<std::string, std::shared_ptr<ftk::Bellows> >&);

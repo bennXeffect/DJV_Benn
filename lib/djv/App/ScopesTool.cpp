@@ -78,6 +78,35 @@ namespace djv
                     {}
                 }
             }
+            if (auto settings = app->getSettings())
+            {
+                nlohmann::json json;
+                if (settings->get(models::settingsKeys::scopesCollapsed, json) &&
+                    json.is_array() && 3 == json.size())
+                {
+                    try
+                    {
+                        std::array<bool, 3> collapsed;
+                        for (size_t i = 0; i < 3; ++i)
+                        {
+                            collapsed[i] = json[i].get<bool>();
+                        }
+                        p.widget->setCollapsed(collapsed);
+                    }
+                    catch (const std::exception&)
+                    {}
+                }
+            }
+            p.widget->setCollapsedCallback(
+                [settingsWeak](const std::array<bool, 3>& value)
+                {
+                    if (auto settings = settingsWeak.lock())
+                    {
+                        settings->set(
+                            models::settingsKeys::scopesCollapsed,
+                            nlohmann::json(std::vector<bool>(value.begin(), value.end())));
+                    }
+                });
             p.widget->setHeightsCallback(
                 [settingsWeak](const std::array<float, 3>& value)
                 {

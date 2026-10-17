@@ -25,6 +25,7 @@ namespace djv
             //! later included.
             std::vector<std::string> openSaved;
             std::shared_ptr<ftk::ObservableList<std::string> > openTools;
+            std::shared_ptr<ftk::ObservableList<std::string> > leftTools;
             std::shared_ptr<ftk::Observable<std::pair<std::string, std::string> > > showSection;
         };
 
@@ -55,6 +56,9 @@ namespace djv
             // read the old one as a list of one.
             p.settings->get(settingsKeys::toolsOpen, p.openSaved);
             p.openTools = ftk::ObservableList<std::string>::create(_sorted(p.openSaved));
+            std::vector<std::string> leftTools;
+            p.settings->get(settingsKeys::toolsLeft, leftTools);
+            p.leftTools = ftk::ObservableList<std::string>::create(leftTools);
             p.showSection = ftk::Observable<std::pair<std::string, std::string> >::create();
         }
 
@@ -71,6 +75,7 @@ namespace djv
         {
             FTK_P();
             p.settings->set(settingsKeys::toolsOpen, p.openTools->get());
+            p.settings->set(settingsKeys::toolsLeft, p.leftTools->get());
         }
 
         std::shared_ptr<ToolsModel> ToolsModel::create(const std::shared_ptr<ftk::Settings>& settings)
@@ -149,6 +154,37 @@ namespace djv
         std::shared_ptr<ftk::IObservable<std::pair<std::string, std::string> > > ToolsModel::observeShowSection() const
         {
             return _p->showSection;
+        }
+
+        bool ToolsModel::isToolLeft(const std::string& value) const
+        {
+            FTK_P();
+            const auto& left = p.leftTools->get();
+            return std::find(left.begin(), left.end(), value) != left.end();
+        }
+
+        void ToolsModel::setToolLeft(const std::string& value, bool left)
+        {
+            FTK_P();
+            auto tools = p.leftTools->get();
+            const auto i = std::find(tools.begin(), tools.end(), value);
+            if (left && i == tools.end())
+            {
+                tools.push_back(value);
+            }
+            else if (!left && i != tools.end())
+            {
+                tools.erase(i);
+            }
+            if (p.leftTools->setIfChanged(tools))
+            {
+                p.settings->set(settingsKeys::toolsLeft, tools);
+            }
+        }
+
+        std::shared_ptr<ftk::IObservableList<std::string> > ToolsModel::observeLeftTools() const
+        {
+            return _p->leftTools;
         }
 
         std::vector<std::string> ToolsModel::_sorted(
