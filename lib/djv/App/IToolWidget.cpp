@@ -191,9 +191,11 @@ namespace djv
             FTK_P();
             p.collapsed = value;
             p.collapseIcon->setIcon(value ? "BellowsClosed" : "BellowsOpen");
+            // Collapsed, the tool is its header alone. Open, it takes the
+            // height its contents need, as it did before it could collapse:
+            // stretched, the one tool open took the whole height of the
+            // dock.
             p.toolLayout->setVisible(!value);
-            // Collapsed, the tool takes no more than its header.
-            setVStretch(value ? ftk::Stretch::Fixed : ftk::Stretch::Expanding);
             p.settings->set(ftk::Format("/{0}/Collapsed").arg(p.name), value);
             setSizeUpdate();
             setDrawUpdate();
