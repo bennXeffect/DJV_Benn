@@ -63,6 +63,7 @@ namespace djv
                 settingsKeys::informationBellows,
                 settingsKeys::magnifyLevel,
                 settingsKeys::magnifyViewPosAndZoom,
+                settingsKeys::scopesHeights,
                 settingsKeys::timeUnits,
                 settingsKeys::toolsOpen,
                 settingsKeys::viewportAlphaBlendAuto,

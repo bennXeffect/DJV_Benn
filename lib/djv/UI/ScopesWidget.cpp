@@ -52,10 +52,13 @@ namespace djv
             const int sampleW = 512;
             const int sampleH = 288;
 
-            // The heights the scopes are drawn at, before the display scale.
-            const int histogramDrawH = 90;
-            const int waveformDrawH = 110;
-            const int vectorscopeDrawH = 150;
+            // The heights the scopes are drawn at to start with, and the
+            // range a drag keeps them in, before the display scale.
+            const std::array<float, 3> drawHDefault = { 90.F, 110.F, 150.F };
+            const float drawHMin = 40.F;
+            const float drawHMax = 1200.F;
+            // The grip under each scope, before the display scale.
+            const float gripH = 8.F;
 
             std::shared_ptr<ftk::Image> createImage(int w, int h)
             {
@@ -297,6 +300,15 @@ namespace djv
             std::shared_ptr<ftk::Image> histogram;
             std::shared_ptr<ftk::Image> waveform;
             std::shared_ptr<ftk::Image> vectorscope;
+
+            std::array<float, 3> heights = drawHDefault;
+            std::function<void(const std::array<float, 3>&)> heightsCallback;
+            //! The grip under the pointer, and the one being dragged, with
+            //! where the drag started.
+            int gripHover = -1;
+            int gripDrag = -1;
+            float gripDragHeight = 0.F;
+            int gripDragY = 0;
             //! The measurement running, one at a time; a frame that comes
             //! meanwhile is measured after it.
             std::future<ScopesResult> measuring;
@@ -431,13 +443,14 @@ namespace djv
             const int w = std::lround(280 * event.displayScale);
             const int line = p.size.fontMetrics.lineHeight;
             p.size.sizeHint.w = w + p.size.margin * 2;
+            const int grip = std::lround(gripH * event.displayScale);
             p.size.sizeHint.h =
                 p.size.margin * 2 +
                 (line + p.size.spacing) * 3 +
-                std::lround(histogramDrawH * event.displayScale) +
-                std::lround(waveformDrawH * event.displayScale) +
-                std::lround(vectorscopeDrawH * event.displayScale) +
-                p.size.spacing * 2;
+                std::lround(p.heights[0] * event.displayScale) +
+                std::lround(p.heights[1] * event.displayScale) +
+                std::lround(p.heights[2] * event.displayScale) +
+                grip * 3;
         }
 
         void ScopesWidget::tickEvent(
@@ -491,9 +504,7 @@ namespace djv
             FTK_P();
             const ftk::Box2I g = ftk::margin(getGeometry(), -p.size.margin);
             const int line = p.size.fontMetrics.lineHeight;
-            const int histH = std::lround(histogramDrawH * event.displayScale);
-            const int waveH = std::lround(waveformDrawH * event.displayScale);
-            const int vecH = std::lround(vectorscopeDrawH * event.displayScale);
+            const auto boxes = _boxes();
             const ftk::Color4F textColor = event.style->getColorRole(ftk::ColorRole::Text);
             const ftk::Color4F bgColor(0.F, 0.F, 0.F, 1.F);
             const ftk::Color4F gridColor(1.F, 1.F, 1.F, .15F);
@@ -513,9 +524,27 @@ namespace djv
                 y += line + p.size.spacing;
             };
 
+            // The grips under the scopes: a short bar, brighter under the
+            // pointer or while dragged.
+            const auto grip = [&](int index, const ftk::Box2I& scope)
+            {
+                const int gh = std::lround(gripH * event.displayScale);
+                const int bw = std::lround(36 * event.displayScale);
+                const int bh = std::max(2, static_cast<int>(std::lround(2 * event.displayScale)));
+                const bool hot = index == p.gripDrag || (p.gripDrag < 0 && index == p.gripHover);
+                event.render->drawRect(
+                    ftk::Box2I(
+                        g.min.x + (g.w() - bw) / 2,
+                        scope.max.y + 1 + (gh - bh) / 2,
+                        bw,
+                        bh),
+                    ftk::Color4F(1.F, 1.F, 1.F, hot ? .8F : .25F));
+            };
+
             // Histogram.
+            y = boxes[0].min.y - line - p.size.spacing;
             title("Histogram" + sourceLabel);
-            ftk::Box2I box(g.min.x, y, g.w(), histH);
+            ftk::Box2I box = boxes[0];
             event.render->drawRect(box, bgColor);
             for (int i = 1; i < 4; ++i)
             {
@@ -526,11 +555,12 @@ namespace djv
             {
                 event.render->drawImage(p.histogram, box, ftk::Color4F(1.F, 1.F, 1.F), imageOptions);
             }
-            y += histH + p.size.spacing;
+            grip(0, box);
 
             // Waveform.
+            y = boxes[1].min.y - line - p.size.spacing;
             title("Waveform" + sourceLabel);
-            box = ftk::Box2I(g.min.x, y, g.w(), waveH);
+            box = boxes[1];
             event.render->drawRect(box, bgColor);
             for (int i = 1; i < 4; ++i)
             {
@@ -541,12 +571,14 @@ namespace djv
             {
                 event.render->drawImage(p.waveform, box, ftk::Color4F(1.F, 1.F, 1.F), imageOptions);
             }
-            y += waveH + p.size.spacing;
+            grip(1, box);
 
             // Vectorscope, square and centered.
+            y = boxes[2].min.y - line - p.size.spacing;
             title("Vectorscope" + sourceLabel);
-            const int s = std::min(g.w(), vecH);
-            box = ftk::Box2I(g.min.x + (g.w() - s) / 2, y, s, s);
+            const int s = boxes[2].h();
+            box = ftk::Box2I(g.min.x + (g.w() - s) / 2, boxes[2].min.y, s, s);
+            grip(2, boxes[2]);
             event.render->drawRect(box, bgColor);
             const ftk::V2F c(box.min.x + s / 2.F, box.min.y + s / 2.F);
             const float r = s / 2.F - 1.F;
@@ -586,6 +618,143 @@ namespace djv
                 event.render->drawRect(
                     ftk::Box2F(pos.x - h, pos.y - h, h * 2.F, h * 2.F),
                     ftk::Color4F(t.r, t.g, t.b, .8F));
+            }
+        }
+
+        void ScopesWidget::setHeights(const std::array<float, 3>& value)
+        {
+            FTK_P();
+            std::array<float, 3> heights;
+            for (size_t i = 0; i < 3; ++i)
+            {
+                heights[i] = std::clamp(value[i], drawHMin, drawHMax);
+            }
+            if (heights == p.heights)
+                return;
+            p.heights = heights;
+            setSizeUpdate();
+            setDrawUpdate();
+        }
+
+        void ScopesWidget::setHeightsCallback(const std::function<void(const std::array<float, 3>&)>& value)
+        {
+            _p->heightsCallback = value;
+        }
+
+        std::array<ftk::Box2I, 3> ScopesWidget::_boxes() const
+        {
+            FTK_P();
+            // Each scope under its title, its grip under it. The vectorscope
+            // is as tall as it is set to and no wider than the widget: a
+            // square, so a narrow panel caps it.
+            const ftk::Box2I g = ftk::margin(getGeometry(), -p.size.margin);
+            const float scale = p.size.displayScale;
+            const int line = p.size.fontMetrics.lineHeight;
+            const int grip = std::lround(gripH * scale);
+            std::array<ftk::Box2I, 3> out;
+            int y = g.min.y;
+            for (size_t i = 0; i < 3; ++i)
+            {
+                y += line + p.size.spacing;
+                int h = std::lround(p.heights[i] * scale);
+                if (2 == i)
+                {
+                    h = std::min(g.w(), h);
+                }
+                out[i] = ftk::Box2I(g.min.x, y, g.w(), h);
+                y += h + grip;
+            }
+            return out;
+        }
+
+        int ScopesWidget::_gripAt(const ftk::V2I& pos) const
+        {
+            FTK_P();
+            const auto boxes = _boxes();
+            const int grip = std::lround(gripH * p.size.displayScale);
+            for (int i = 0; i < 3; ++i)
+            {
+                const ftk::Box2I box(
+                    boxes[i].min.x,
+                    boxes[i].max.y - grip / 2,
+                    boxes[i].w(),
+                    grip * 2);
+                if (ftk::contains(box, pos))
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        void ScopesWidget::mouseLeaveEvent()
+        {
+            IWidget::mouseLeaveEvent();
+            FTK_P();
+            if (p.gripHover != -1)
+            {
+                p.gripHover = -1;
+                setDrawUpdate();
+            }
+        }
+
+        void ScopesWidget::mouseMoveEvent(ftk::MouseMoveEvent& event)
+        {
+            IWidget::mouseMoveEvent(event);
+            FTK_P();
+            if (p.gripDrag >= 0)
+            {
+                event.accept = true;
+                const float scale = std::max(p.size.displayScale, .01F);
+                std::array<float, 3> heights = p.heights;
+                heights[p.gripDrag] = p.gripDragHeight + (event.pos.y - p.gripDragY) / scale;
+                setHeights(heights);
+                return;
+            }
+            const int hover = _gripAt(event.pos);
+            if (hover != p.gripHover)
+            {
+                p.gripHover = hover;
+                setDrawUpdate();
+            }
+        }
+
+        void ScopesWidget::mousePressEvent(ftk::MouseClickEvent& event)
+        {
+            IWidget::mousePressEvent(event);
+            FTK_P();
+            if (ftk::MouseButton::Left == event.button)
+            {
+                const int grip = _gripAt(event.pos);
+                if (grip >= 0)
+                {
+                    event.accept = true;
+                    p.gripDrag = grip;
+                    // The vectorscope from what shows, in case a narrow
+                    // panel had capped it.
+                    const auto boxes = _boxes();
+                    p.gripDragHeight = 2 == grip ?
+                        boxes[2].h() / std::max(p.size.displayScale, .01F) :
+                        p.heights[grip];
+                    p.gripDragY = event.pos.y;
+                    setDrawUpdate();
+                }
+            }
+        }
+
+        void ScopesWidget::mouseReleaseEvent(ftk::MouseClickEvent& event)
+        {
+            IWidget::mouseReleaseEvent(event);
+            FTK_P();
+            if (p.gripDrag >= 0)
+            {
+                event.accept = true;
+                p.gripDrag = -1;
+                setDrawUpdate();
+                if (p.heightsCallback)
+                {
+                    p.heightsCallback(p.heights);
+                }
             }
         }
 

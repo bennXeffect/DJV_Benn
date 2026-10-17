@@ -7,6 +7,9 @@
 #include <djv/App/MainWindow.h>
 #include <djv/Models/ColorModel.h>
 #include <djv/Models/LayerStack.h>
+#include <djv/Models/SettingsModel.h>
+
+#include <tlRender/UI/ThumbnailSystem.h>
 
 #include <ftk/UI/ComboBox.h>
 #include <ftk/UI/Divider.h>
@@ -39,6 +42,13 @@ namespace djv
             std::shared_ptr<ftk::VerticalLayout> rowsLayout;
             std::shared_ptr<ftk::VerticalLayout> layout;
 
+            //! What each layer's file is, asked for once by path, and the
+            //! line under each row that says it.
+            std::map<std::string, tl::IOInfo> infos;
+            std::map<std::string, tl::ui::InfoRequest> infoRequests;
+            std::shared_ptr<ftk::Timer> infoTimer;
+            std::vector<std::pair<int, std::shared_ptr<ftk::Label> > > infoLabels;
+
             std::shared_ptr<ftk::Observer<std::optional<models::LayerStack> > > stackObserver;
             std::shared_ptr<ftk::Observer<tl::OCIOOptions> > ocioObserver;
         };
@@ -60,6 +70,7 @@ namespace djv
             FTK_P();
             p.app = app;
             p.pendingTimer = ftk::Timer::create(context);
+            p.infoTimer = ftk::Timer::create(context);
 
             p.newButton = ftk::PushButton::create(context, "Stack Open Files");
             p.newButton->setIcon("FileNew");
@@ -178,6 +189,129 @@ namespace djv
                 });
         }
 
+        void LayersTool::_infoUpdate()
+        {
+            FTK_P();
+            auto app = p.app.lock();
+            if (!app || !p.stack.has_value())
+                return;
+
+            // The answers that came.
+            auto i = p.infoRequests.begin();
+            while (i != p.infoRequests.end())
+            {
+                if (i->second.future.valid() &&
+                    std::future_status::ready == i->second.future.wait_for(std::chrono::seconds(0)))
+                {
+                    p.infos[i->first] = i->second.future.get();
+                    i = p.infoRequests.erase(i);
+                }
+                else
+                {
+                    ++i;
+                }
+            }
+
+            const auto colorModel = app->getColorModel();
+            for (const auto& row : p.infoLabels)
+            {
+                if (row.first < 0 || row.first >= static_cast<int>(p.stack->layers.size()))
+                    continue;
+                const models::Layer& layer = p.stack->layers[row.first];
+                const auto j = p.infos.find(layer.path.get());
+                if (j == p.infos.end())
+                {
+                    row.second->setText("Reading...");
+                    row.second->setTooltip(std::string());
+                    continue;
+                }
+                const tl::IOInfo& info = j->second;
+                std::vector<std::string> parts;
+                std::vector<std::string> lines;
+                lines.push_back(layer.path.get());
+                if (!info.video.empty())
+                {
+                    const ftk::ImageInfo& video = info.video.front();
+                    parts.push_back(ftk::Format("{0}x{1}").arg(video.size.w).arg(video.size.h));
+                    parts.push_back(ftk::to_string(video.type));
+                    lines.push_back(ftk::Format("Size: {0}x{1}, pixel aspect {2}").
+                        arg(video.size.w).arg(video.size.h).arg(video.pixelAspectRatio, 2));
+                    lines.push_back("Pixels: " + ftk::to_string(video.type));
+                }
+                if (info.videoTime.has_value())
+                {
+                    const OTIO_NS::TimeRange& range = info.videoTime.value();
+                    const int64_t first = static_cast<int64_t>(std::llround(range.start_time().value()));
+                    const int64_t last = static_cast<int64_t>(std::llround(range.end_time_inclusive().value()));
+                    std::string frames = ftk::Format("{0}-{1}").arg(first).arg(last);
+                    if (layer.offset != 0)
+                    {
+                        // Where the offset puts it in the stack.
+                        frames += ftk::Format(" (at {0}-{1})").
+                            arg(first + layer.offset).
+                            arg(last + layer.offset);
+                    }
+                    parts.push_back(frames);
+                    lines.push_back(ftk::Format("Frames: {0}, {1} fps").
+                        arg(frames).
+                        arg(range.duration().rate(), 2));
+                }
+                // The color space the layer is read in: the one chosen, or
+                // what the file and the rules make of it.
+                std::string colorSpace;
+                if (layer.colorSpace == models::getLayerViewInverseToken())
+                {
+                    colorSpace = "View inverse";
+                }
+                else if (!layer.colorSpace.empty())
+                {
+                    colorSpace = layer.colorSpace + " (chosen)";
+                }
+                else
+                {
+                    const std::string resolved = colorModel->resolveInput(layer.path.get(), info.tags);
+                    colorSpace = resolved.empty() ?
+                        std::string("the input of the color options") :
+                        resolved + " (automatic)";
+                }
+                parts.push_back(colorSpace);
+                lines.push_back("Color space: " + colorSpace);
+                if (!info.tags.empty())
+                {
+                    lines.push_back(std::string());
+                    size_t n = 0;
+                    for (const auto& tag : info.tags)
+                    {
+                        if (++n > 24)
+                        {
+                            lines.push_back(ftk::Format("... and {0} more in the Information tool "
+                                "with the layer opened by itself").arg(info.tags.size() - 24));
+                            break;
+                        }
+                        std::string value = tag.second;
+                        if (value.size() > 80)
+                        {
+                            value = value.substr(0, 77) + "...";
+                        }
+                        lines.push_back(tag.first + ": " + value);
+                    }
+                }
+                row.second->setText(ftk::join(parts, "  \xC2\xB7  "));
+                row.second->setTooltip(ftk::join(lines, '\n'));
+            }
+
+            // Looked for again until every answer came.
+            if (!p.infoRequests.empty())
+            {
+                p.infoTimer->start(
+                    std::chrono::milliseconds(100),
+                    [this]
+                    {
+                        _infoUpdate();
+                    });
+            }
+        }
+
         void LayersTool::_rowsUpdate()
         {
             FTK_P();
@@ -191,6 +325,7 @@ namespace djv
             {
                 child->setParent(nullptr);
             }
+            p.infoLabels.clear();
 
             p.saveButton->setEnabled(p.stack.has_value());
             if (!p.stack.has_value())
@@ -281,6 +416,25 @@ namespace djv
                 }
                 colorSpaceComboBox->setCurrentIndex(csIndex);
 
+                // What the layer's file is, in a line: the Information tool
+                // is about the stack, which says nothing of its layers. The
+                // rest, metadata and all, in the tooltip.
+                auto infoLabel = ftk::Label::create(context, rowLayout);
+                infoLabel->setTextRole(ftk::ColorRole::TextDisabled);
+                infoLabel->setElide(true);
+                p.infoLabels.push_back(std::make_pair(i, infoLabel));
+                const std::string key = layer.path.get();
+                if (p.infos.find(key) == p.infos.end() &&
+                    p.infoRequests.find(key) == p.infoRequests.end())
+                {
+                    if (auto thumbnailSystem = context->getSystem<tl::ui::ThumbnailSystem>())
+                    {
+                        p.infoRequests[key] = thumbnailSystem->getInfo(
+                            layer.path,
+                            app->getSettingsModel()->getIOOptions());
+                    }
+                }
+
                 visibleButton->setClickedCallback(
                     [this, stack, i]
                     {
@@ -335,6 +489,8 @@ namespace djv
                         _apply(tmp);
                     });
             }
+
+            _infoUpdate();
         }
     }
 }

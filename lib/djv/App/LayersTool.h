@@ -42,6 +42,7 @@ namespace djv
         private:
             void _apply(const models::LayerStack&);
             void _rowsUpdate();
+            void _infoUpdate();
 
             FTK_PRIVATE();
         };

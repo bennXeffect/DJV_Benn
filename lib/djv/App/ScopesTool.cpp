@@ -3,6 +3,10 @@
 
 #include <djv/App/ScopesTool.h>
 
+#include <ftk/UI/Settings.h>
+
+#include <djv/Models/SettingsKeys.h>
+
 #include <djv/App/App.h>
 #include <djv/App/MainWindow.h>
 #include <djv/UI/ScopesWidget.h>
@@ -52,6 +56,38 @@ namespace djv
                 "File values: the values stored in the file, from zero to one.");
 
             p.widget = ui::ScopesWidget::create(context, app->getColorModel());
+            // The heights the scopes were dragged to, kept from one session
+            // to the next.
+            std::weak_ptr<ftk::Settings> settingsWeak = app->getSettings();
+            if (auto settings = app->getSettings())
+            {
+                nlohmann::json json;
+                if (settings->get(models::settingsKeys::scopesHeights, json) &&
+                    json.is_array() && 3 == json.size())
+                {
+                    try
+                    {
+                        std::array<float, 3> heights;
+                        for (size_t i = 0; i < 3; ++i)
+                        {
+                            heights[i] = json[i].get<float>();
+                        }
+                        p.widget->setHeights(heights);
+                    }
+                    catch (const std::exception&)
+                    {}
+                }
+            }
+            p.widget->setHeightsCallback(
+                [settingsWeak](const std::array<float, 3>& value)
+                {
+                    if (auto settings = settingsWeak.lock())
+                    {
+                        settings->set(
+                            models::settingsKeys::scopesHeights,
+                            nlohmann::json(std::vector<float>(value.begin(), value.end())));
+                    }
+                });
 
             p.layout = ftk::VerticalLayout::create(context);
             p.layout->setMarginRole(ftk::SizeRole::MarginSmall);

@@ -7,6 +7,9 @@
 
 #include <ftk/UI/IWidget.h>
 
+#include <array>
+#include <functional>
+
 #include <ftk/Core/Util.h>
 
 namespace tl
@@ -67,14 +70,28 @@ namespace djv
             //! Set what the scopes measure.
             DJV_UI_API void setSource(ScopesSource);
 
+            //! Set the heights of the histogram, the waveform and the
+            //! vectorscope, before the display scale. Each is dragged by the
+            //! grip under it; the vectorscope stays square.
+            DJV_UI_API void setHeights(const std::array<float, 3>&);
+
+            //! Set the callback for when a height is dragged.
+            DJV_UI_API void setHeightsCallback(const std::function<void(const std::array<float, 3>&)>&);
+
             DJV_UI_API ftk::Size2I getSizeHint() const override;
             DJV_UI_API void setGeometry(const ftk::Box2I&) override;
             DJV_UI_API void sizeHintEvent(const ftk::SizeHintEvent&) override;
             DJV_UI_API void tickEvent(bool, bool, const ftk::TickEvent&) override;
             DJV_UI_API void drawEvent(const ftk::Box2I&, const ftk::DrawEvent&) override;
+            DJV_UI_API void mouseLeaveEvent() override;
+            DJV_UI_API void mouseMoveEvent(ftk::MouseMoveEvent&) override;
+            DJV_UI_API void mousePressEvent(ftk::MouseClickEvent&) override;
+            DJV_UI_API void mouseReleaseEvent(ftk::MouseClickEvent&) override;
 
         private:
             void _processorUpdate();
+            std::array<ftk::Box2I, 3> _boxes() const;
+            int _gripAt(const ftk::V2I&) const;
 
             FTK_PRIVATE();
         };
