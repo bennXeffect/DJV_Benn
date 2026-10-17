@@ -73,6 +73,18 @@ namespace djv
             //! metadata tags each was read with.
             DJV_MODELS_API void setActiveFiles(const std::vector<std::pair<std::string, ftk::ImageTags> >&);
 
+            //! Observe whether a JPG is shown with the display's Standard
+            //! view rather than the one chosen, as Blender's image editor
+            //! shows a picture: a JPG has its view in it already, saved
+            //! from a render, and a second one over it washes it out. Only
+            //! a JPG shown by itself; a layer stack has the one view for
+            //! all its layers (see the view inverse color space for those).
+            //! The resolved options carry the view used.
+            DJV_MODELS_API std::shared_ptr<ftk::IObservable<bool> > observeJPGStandardView() const;
+
+            //! Set whether a JPG is shown with the Standard view.
+            DJV_MODELS_API void setJPGStandardView(bool);
+
             //! Resolve an input color space for a file: the extension
             //! assignments, then what the file declares, then the
             //! configuration's file rules. Empty when nothing resolves.

@@ -13,8 +13,11 @@
 #include <ftk/Core/Path.h>
 #include <ftk/Core/String.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <sstream>
 
 #if defined(TLRENDER_OCIO)
@@ -106,6 +109,7 @@ namespace djv
             std::shared_ptr<ftk::Observable<tl::LUTOptions> > lutOptions;
             std::shared_ptr<ftk::Observable<std::map<std::string, std::string> > > extColorSpaces;
             std::shared_ptr<ftk::ObservableList<std::string> > blenderDirs;
+            std::shared_ptr<ftk::Observable<bool> > jpgStandardView;
             std::map<std::string, std::string> layerColorSpaces;
             std::vector<std::pair<std::string, ftk::ImageTags> > activeFiles;
             std::shared_ptr<ftk::Observable<std::vector<std::string> > > resolvedInputs;
@@ -151,6 +155,9 @@ namespace djv
             std::vector<std::string> blenderDirs;
             p.settings->get(settingsKeys::colorBlenderDirs, blenderDirs);
             p.blenderDirs = ftk::ObservableList<std::string>::create(blenderDirs);
+            bool jpgStandardView = true;
+            p.settings->get(settingsKeys::colorJPGStandardView, jpgStandardView);
+            p.jpgStandardView = ftk::Observable<bool>::create(jpgStandardView);
             p.resolvedOCIOOptions = ftk::Observable<tl::OCIOOptions>::create(
                 _resolvedOCIOOptions());
             p.resolvedInput = ftk::Observable<std::string>::create(
@@ -198,6 +205,7 @@ namespace djv
             p.settings->setT(settingsKeys::colorOCIO, p.ocioOptions->get());
             p.settings->setT(settingsKeys::colorOCIOExtColorSpaces, p.extColorSpaces->get());
             p.settings->set(settingsKeys::colorBlenderDirs, p.blenderDirs->get());
+            p.settings->set(settingsKeys::colorJPGStandardView, p.jpgStandardView->get());
             p.settings->setT(settingsKeys::colorLUT, p.lutOptions->get());
         }
 
@@ -239,6 +247,20 @@ namespace djv
                 _ocioConfigUpdate(options);
             }
             _resolvedUpdate();
+        }
+
+        std::shared_ptr<ftk::IObservable<bool> > ColorModel::observeJPGStandardView() const
+        {
+            return _p->jpgStandardView;
+        }
+
+        void ColorModel::setJPGStandardView(bool value)
+        {
+            FTK_P();
+            if (p.jpgStandardView->setIfChanged(value))
+            {
+                _resolvedUpdate();
+            }
         }
 
         std::shared_ptr<ftk::IObservable<tl::OCIOOptions> > ColorModel::observeResolvedOCIOOptions() const
@@ -468,6 +490,44 @@ namespace djv
                 // image is unmanaged rather than saying nothing.
                 p.resolvedInputLabel = label;
                 _logInput(p.activeFiles[0].first, label);
+            }
+
+            // A JPG by itself is shown with the Standard view, when the
+            // display has one: see setJPGStandardView().
+            if (out.enabled &&
+                p.jpgStandardView->get() &&
+                !p.activeFiles.empty())
+            {
+                std::string ext = std::filesystem::path(p.activeFiles[0].first).extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(),
+                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (".jpg" == ext || ".jpeg" == ext)
+                {
+#if defined(TLRENDER_OCIO)
+                    if (p.ocioConfig)
+                    {
+                        try
+                        {
+                            const char* display = out.display.empty() ?
+                                p.ocioConfig->getDefaultDisplay() :
+                                out.display.c_str();
+                            const int count = p.ocioConfig->getNumViews(display);
+                            for (int i = 0; i < count; ++i)
+                            {
+                                const char* view = p.ocioConfig->getView(display, i);
+                                if (view && std::string("Standard") == view)
+                                {
+                                    out.view = view;
+                                    out.look = std::string();
+                                    break;
+                                }
+                            }
+                        }
+                        catch (const std::exception&)
+                        {}
+                    }
+#endif // TLRENDER_OCIO
+                }
             }
             return out;
         }

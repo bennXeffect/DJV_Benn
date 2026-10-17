@@ -13,6 +13,19 @@ namespace djv
 {
     namespace ui
     {
+        namespace
+        {
+            //! The options as written, with the view and the look the
+            //! resolved options use.
+            tl::OCIOOptions viewOf(const tl::OCIOOptions& written, const tl::OCIOOptions& resolved)
+            {
+                tl::OCIOOptions out = written;
+                out.view = resolved.view;
+                out.look = resolved.look;
+                return out;
+            }
+        }
+
         struct ViewportBinding::Private
         {
             std::weak_ptr<tl::ui::Viewport> viewport;
@@ -28,6 +41,7 @@ namespace djv
 
             std::shared_ptr<ftk::Observer<tl::CompareOptions> > compareOptionsObserver;
             std::shared_ptr<ftk::Observer<tl::OCIOOptions> > ocioOptionsObserver;
+            std::shared_ptr<ftk::Observer<tl::OCIOOptions> > resolvedOCIOOptionsObserver;
             std::shared_ptr<ftk::Observer<std::vector<std::string> > > resolvedInputsObserver;
             std::shared_ptr<ftk::Observer<tl::LUTOptions> > lutOptionsObserver;
             std::shared_ptr<ftk::Observer<ftk::ImageOptions> > imageOptionsObserver;
@@ -64,11 +78,25 @@ namespace djv
             // rather than to whatever the active file resolved to.
             p.ocioOptionsObserver = ftk::Observer<tl::OCIOOptions>::create(
                 colorModel->observeOCIOOptions(),
-                [this](const tl::OCIOOptions& value)
+                [this, colorModel](const tl::OCIOOptions& value)
                 {
                     if (auto viewport = _p->viewport.lock())
                     {
-                        viewport->setOCIOOptions(value);
+                        viewport->setOCIOOptions(viewOf(
+                            value,
+                            colorModel->observeResolvedOCIOOptions()->get()));
+                    }
+                    _changed();
+                });
+            // The view and the look from the resolved options, which pick
+            // the Standard view for a JPG.
+            p.resolvedOCIOOptionsObserver = ftk::Observer<tl::OCIOOptions>::create(
+                colorModel->observeResolvedOCIOOptions(),
+                [this, colorModel](const tl::OCIOOptions& value)
+                {
+                    if (auto viewport = _p->viewport.lock())
+                    {
+                        viewport->setOCIOOptions(viewOf(colorModel->getOCIOOptions(), value));
                     }
                     _changed();
                 });

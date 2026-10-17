@@ -46,6 +46,7 @@ namespace djv
                 settingsKeys::audioVolume,
                 settingsKeys::audioMute,
                 settingsKeys::colorBlenderDirs,
+                settingsKeys::colorJPGStandardView,
                 settingsKeys::colorOCIO,
                 settingsKeys::colorOCIOExtColorSpaces,
                 settingsKeys::colorLUT,

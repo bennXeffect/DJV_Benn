@@ -328,6 +328,7 @@ namespace djv
 
             std::shared_ptr<ftk::ListObserver<tl::VideoFrame> > videoObserver;
             std::shared_ptr<ftk::Observer<tl::OCIOOptions> > ocioOptionsObserver;
+            std::shared_ptr<ftk::Observer<tl::OCIOOptions> > resolvedOCIOOptionsObserver;
             std::shared_ptr<ftk::Observer<std::vector<std::string> > > resolvedInputsObserver;
         };
 
@@ -342,6 +343,13 @@ namespace djv
 
             p.ocioOptionsObserver = ftk::Observer<tl::OCIOOptions>::create(
                 colorModel->observeOCIOOptions(),
+                [this](const tl::OCIOOptions&)
+                {
+                    _p->processorDirty = true;
+                    _p->dirty = true;
+                });
+            p.resolvedOCIOOptionsObserver = ftk::Observer<tl::OCIOOptions>::create(
+                colorModel->observeResolvedOCIOOptions(),
                 [this](const tl::OCIOOptions&)
                 {
                     _p->processorDirty = true;
@@ -807,7 +815,9 @@ namespace djv
                             {
                                 display = config->getDefaultDisplay();
                             }
-                            std::string view = options.view;
+                            // The view the viewport shows with: a JPG's is
+                            // the Standard view.
+                            std::string view = p.colorModel->observeResolvedOCIOOptions()->get().view;
                             if (view.empty())
                             {
                                 view = config->getDefaultView(display.c_str());
@@ -818,10 +828,11 @@ namespace djv
                             dvt->setView(view.c_str());
                             auto pipeline = OCIO::LegacyViewingPipeline::Create();
                             pipeline->setDisplayViewTransform(dvt);
-                            if (!options.look.empty())
+                            const std::string look = p.colorModel->observeResolvedOCIOOptions()->get().look;
+                            if (!look.empty())
                             {
                                 pipeline->setLooksOverrideEnabled(true);
-                                pipeline->setLooksOverride(options.look.c_str());
+                                pipeline->setLooksOverride(look.c_str());
                             }
                             auto processor = pipeline->getProcessor(
                                 config,

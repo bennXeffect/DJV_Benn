@@ -75,6 +75,8 @@ namespace djv
             std::shared_ptr<ftk::ComboBox> displayComboBox;
             std::shared_ptr<ftk::ComboBox> viewComboBox;
             std::shared_ptr<ftk::ComboBox> lookComboBox;
+            std::shared_ptr<ftk::CheckBox> jpgStandardCheckBox;
+            std::shared_ptr<ftk::Label> shownWithLabel;
             std::shared_ptr<ftk::ComboBox> extAddExtComboBox;
             std::shared_ptr<ftk::ComboBox> extAddColorSpaceComboBox;
             std::shared_ptr<ftk::ToolButton> extAddButton;
@@ -88,6 +90,8 @@ namespace djv
             std::shared_ptr<ftk::Observer<models::OCIOModelData> > dataObserver;
             std::shared_ptr<ftk::Observer<std::map<std::string, std::string> > > extObserver;
             std::shared_ptr<ftk::Observer<std::string> > resolvedObserver;
+            std::shared_ptr<ftk::Observer<bool> > jpgStandardObserver;
+            std::shared_ptr<ftk::Observer<tl::OCIOOptions> > shownWithObserver;
             std::shared_ptr<ftk::ListObserver<std::string> > blenderDirsObserver;
         };
 
@@ -101,6 +105,17 @@ namespace djv
 
             p.colorModel = colorModel;
             p.ocioModel = models::OCIOModel::create(context);
+
+            p.jpgStandardCheckBox = ftk::CheckBox::create(context, "Standard view");
+            p.jpgStandardCheckBox->setTooltip(
+                "Show a JPG with the display's Standard view rather than the "
+                "one chosen, as Blender's image editor shows a picture: a JPG "
+                "saved from a render has the view in it already, and a second "
+                "one over it washes it out.\n"
+                "Only a JPG shown by itself. A layer stack has one view for all "
+                "its layers; give a JPG layer the \"View inverse\" color space "
+                "in the Layers tool instead.");
+            p.shownWithLabel = ftk::Label::create(context);
 
             p.enabledCheckBox = ftk::CheckBox::create(context);
             p.enabledCheckBox->setTooltip("Toggle whether OCIO is enabled.");
@@ -215,6 +230,9 @@ namespace djv
             p.formLayout->addRow("Display:", p.displayComboBox);
             p.formLayout->addRow("View:", p.viewComboBox);
             p.formLayout->addRow("Look:", p.lookComboBox);
+            p.formLayout->addRow("JPG:", p.jpgStandardCheckBox);
+            p.formLayout->addRow("Shown with:", p.shownWithLabel);
+            p.formLayout->setRowVisible(p.shownWithLabel, false);
             // The extension and its color space are on two rows. On one,
             // with the button, they made the tool wider than anything else
             // in it; this way an assignment is no wider than the rows of
@@ -278,6 +296,32 @@ namespace djv
                 [this](bool value)
                 {
                     _p->ocioModel->setEnabled(value);
+                });
+
+            p.jpgStandardCheckBox->setCheckedCallback(
+                [this](bool value)
+                {
+                    _p->colorModel->setJPGStandardView(value);
+                });
+            p.jpgStandardObserver = ftk::Observer<bool>::create(
+                colorModel->observeJPGStandardView(),
+                [this](bool value)
+                {
+                    _p->jpgStandardCheckBox->setChecked(value);
+                });
+            // Said when the picture is not shown with the view chosen.
+            p.shownWithObserver = ftk::Observer<tl::OCIOOptions>::create(
+                colorModel->observeResolvedOCIOOptions(),
+                [this](const tl::OCIOOptions& value)
+                {
+                    FTK_P();
+                    const bool other =
+                        value.enabled &&
+                        value.view != p.colorModel->getOCIOOptions().view;
+                    p.shownWithLabel->setText(other ?
+                        value.view + " view (a JPG)" :
+                        std::string());
+                    p.formLayout->setRowVisible(p.shownWithLabel, other);
                 });
 
             p.blenderComboBox->setIndexCallback(
