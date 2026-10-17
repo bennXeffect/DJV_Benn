@@ -2353,11 +2353,20 @@ namespace djv
                 }
                 const double secs = d.count();
                 const OTIO_NS::TimeRange& timeRange = player->getTimeRange();
+                // Whether reading ahead was still at work beside playback.
+                double cachedFrames = 0.0;
+                for (const auto& range : _p->cacheInfo.video)
+                {
+                    cachedFrames += range.duration().rescaled_to(timeRange.duration().rate()).value();
+                }
+                const double cached = timeRange.duration().value() > 0.0 ?
+                    std::min(100.0, cachedFrames / timeRange.duration().value() * 100.0) :
+                    0.0;
                 _log(ftk::Format(
                     "Playback at {0} of {1} fps, audio {2}: shown {3} fps ({4} skipped), "
                     "clock {5} fps ({6} jumps), {7} ticks a second, longest tick {8} ms, "
                     "longest between frames {9} ms, viewport drawn {10} times a second "
-                    "in {11} ms, at most {12} ms").
+                    "in {11} ms, at most {12} ms, {13}% of the media cached").
                     arg(player->getSpeed(), 2).
                     arg(timeRange.duration().rate(), 2).
                     arg(player->getIOInfo().audio.isValid() ? "yes" : "no").
@@ -2370,7 +2379,8 @@ namespace djv
                     arg(stats.maxShownGap * 1000.0, 1).
                     arg(stats.draws / secs, 1).
                     arg(stats.draws > 0 ? stats.drawTotal / stats.draws * 1000.0 : 0.0, 1).
-                    arg(stats.drawMax * 1000.0, 1));
+                    arg(stats.drawMax * 1000.0, 1).
+                    arg(cached, 0));
             };
             if (playing && !stats.active)
             {
