@@ -18,6 +18,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
+#include <mutex>
 #include <sstream>
 
 #if defined(TLRENDER_OCIO)
@@ -124,6 +126,316 @@ namespace djv
             OCIO_NAMESPACE::ConstConfigRcPtr ocioConfig;
 #endif // TLRENDER_OCIO
         };
+
+        namespace
+        {
+            //! What resolving an input color space reads: the model's own, or
+            //! a copy of it for a thread, which the model is not safe for.
+            struct ResolveData
+            {
+    #if defined(TLRENDER_OCIO)
+                OCIO_NAMESPACE::ConstConfigRcPtr config;
+    #endif // TLRENDER_OCIO
+                const std::map<std::string, std::string>& extColorSpaces;
+                const std::map<std::string, std::string>& layerColorSpaces;
+                std::function<std::string()> viewInverse;
+            };
+
+            //! declaredUnmatched is set when the file declares its color
+            //! -- a colorInteropID, chromaticities -- but the configuration
+            //! has no matching space: an explicit declaration that cannot be
+            //! honoured must not be papered over by an extension rule.
+            //! declaredName is what the file declared, for saying so.
+            std::string declaredColorSpace(
+                const ResolveData& d,
+                const ftk::ImageTags& tags,
+                bool& declaredUnmatched,
+                std::string& declaredName)
+            {
+                std::string out;
+                declaredUnmatched = false;
+                declaredName = std::string();
+    #if defined(TLRENDER_OCIO)
+                // What the file was flagged with, matched against the color
+                // spaces the configuration has. The names tried are the
+                // canonical names and aliases the OpenColorIO configurations
+                // use, so a configuration that renamed everything and carries
+                // no aliases simply does not match. Only the common video
+                // encodings are recognized; camera log material is almost never
+                // flagged.
+                if (d.config)
+                {
+                    std::vector<std::string> candidates;
+                    bool declared = false;
+
+                    // The OpenEXR 3.4 colorInteropID attribute is the file
+                    // saying its color space by the color interop forum's
+                    // names, which the configurations carry as aliases -- the
+                    // most direct declaration there is, so it comes first.
+                    if (const auto i = tags.find("colorInteropID");
+                        i != tags.end() && !i->second.empty())
+                    {
+                        candidates.push_back(i->second);
+                        declared = true;
+                        declaredName = i->second;
+                    }
+
+                    // EXR files carry their primaries in the header, exact
+                    // for the standard sets and measured for everything else.
+                    // The tolerance is generous: primaries near a standard set
+                    // are that set within a small error, while falling through
+                    // to a configuration rule written for the extension risks
+                    // a gross one -- a camera characterization near Rec.709
+                    // shown as ACES2065-1 is unrecognizable. The standard sets
+                    // are about 0.04 apart at their closest, so the tolerance
+                    // cannot confuse two of them.
+                    if (const auto i = tags.find("Chromaticities");
+                        i != tags.end() && candidates.empty())
+                    {
+                        declared = true;
+                        // Named after the standard set when one matches below;
+                        // primaries the tables do not know keep this.
+                        declaredName = "chromaticities";
+                        float c[8] = { 0.F };
+                        std::stringstream ss(i->second);
+                        for (size_t j = 0; j < 8; ++j)
+                        {
+                            ss >> c[j];
+                        }
+                        struct Primaries
+                        {
+                            float c[8];
+                            std::vector<std::string> candidates;
+                        };
+                        const std::vector<Primaries> known =
+                        {
+                            { { .64F, .33F, .3F, .6F, .15F, .06F, .3127F, .329F },
+                                { "lin_rec709", "lin_srgb", "Linear Rec.709 (sRGB)",
+                                  "Linear Rec.709" } },
+                            { { .68F, .32F, .265F, .69F, .15F, .06F, .3127F, .329F },
+                                { "lin_p3d65", "Linear P3-D65" } },
+                            { { .708F, .292F, .17F, .797F, .131F, .046F, .3127F, .329F },
+                                { "lin_rec2020", "Linear Rec.2020" } },
+                            { { .7347F, .2653F, 0.F, 1.F, .0001F, -.077F, .32168F, .33767F },
+                                { "aces2065_1", "ACES2065-1" } },
+                            { { .713F, .293F, .165F, .83F, .128F, .044F, .32168F, .33767F },
+                                { "acescg", "ACEScg" } }
+                        };
+                        for (const auto& k : known)
+                        {
+                            bool match = true;
+                            for (size_t j = 0; j < 8 && match; ++j)
+                            {
+                                match = std::abs(c[j] - k.c[j]) < .02F;
+                            }
+                            if (match)
+                            {
+                                candidates = k.candidates;
+                                declaredName = k.candidates.front();
+                                break;
+                            }
+                        }
+                    }
+
+                    // An OpenEXR that declares nothing is not given the format's
+                    // default, linear Rec.709, here: that would outrank the
+                    // configuration, which knows the pipeline the file came from
+                    // where the format can only guess. It falls through to the
+                    // file rules instead.
+
+                    std::string primaries;
+                    std::string transfer;
+                    if (const auto i = tags.find("Color Primaries");
+                        i != tags.end())
+                    {
+                        primaries = i->second;
+                    }
+                    if (const auto i = tags.find("Color Transfer");
+                        i != tags.end())
+                    {
+                        transfer = i->second;
+                    }
+                    if ("bt709" == primaries && "iec61966-2-1" == transfer)
+                    {
+                        candidates = { "srgb_tx", "sRGB - Texture", "sRGB" };
+                    }
+                    else if ("bt709" == primaries && "bt709" == transfer)
+                    {
+                        candidates =
+                        {
+                            "rec1886_rec709_display",
+                            "Rec.1886 Rec.709 - Display",
+                            "Rec.709"
+                        };
+                    }
+                    else if ("bt2020" == primaries && "smpte2084" == transfer)
+                    {
+                        candidates = { "rec2100_pq_display", "Rec.2100-PQ - Display" };
+                    }
+                    else if ("bt2020" == primaries && "arib-std-b67" == transfer)
+                    {
+                        candidates = { "rec2100_hlg_display", "Rec.2100-HLG - Display" };
+                    }
+                    for (const auto& candidate : candidates)
+                    {
+                        try
+                        {
+                            if (const auto colorSpace =
+                                d.config->getColorSpace(candidate.c_str()))
+                            {
+                                out = colorSpace->getName();
+                                break;
+                            }
+                        }
+                        catch (const std::exception&)
+                        {}
+                    }
+                    declaredUnmatched = declared && out.empty();
+                }
+    #endif // TLRENDER_OCIO
+                return out;
+            }
+
+            std::string resolveInputWith(
+                const ResolveData& d,
+                const std::string& path,
+                const ftk::ImageTags& tags,
+                std::string* label)
+            {
+                std::string out;
+    #if defined(TLRENDER_OCIO)
+                std::string source;
+
+                // A timeline is a container of media in whatever color spaces
+                // they each are, so it has no input color space of its own; the
+                // clips resolve individually in the render. Resolving the
+                // container would paint every clip with the first clip's space,
+                // since that is where a timeline's metadata is borrowed from.
+                const std::string ext = ftk::toLower(ftk::Path(path).getExt());
+                if (".otio" == ext || ".otioz" == ext)
+                {
+                    // Said rather than left blank, so that the resolved row does
+                    // not simply vanish for a timeline. No one clip can be named
+                    // instead: several tracks can make up the frame at once.
+                    if (label)
+                    {
+                        *label = "Per clip";
+                    }
+                    return out;
+                }
+
+                // A layer of a layer stack says what it is in the Layers tool,
+                // which is the most deliberate of all.
+                const auto layer = d.layerColorSpaces.find(getMediaKey(path));
+                // The user's own extension assignments come before what the
+                // file says and before the configuration's rules: they are set
+                // from inside DJV, so they are the most deliberate of the
+                // three.
+                const auto& extColorSpaces = d.extColorSpaces;
+                const auto i = extColorSpaces.find(ext);
+                const std::string layerColorSpace =
+                    layer == d.layerColorSpaces.end() ? std::string() :
+                    layer->second == getLayerViewInverseToken() ? d.viewInverse() :
+                    layer->second;
+                if (!layerColorSpace.empty())
+                {
+                    out = layerColorSpace;
+                    source = layer->second == getLayerViewInverseToken() ?
+                        "layer, view inverse" :
+                        "layer";
+                }
+                else if (i != extColorSpaces.end() && !i->second.empty())
+                {
+                    out = i->second;
+                    source = "extension";
+                }
+                else if (bool declaredUnmatched = false; true)
+                {
+                    std::string declaredName;
+                    const std::string declared = declaredColorSpace(
+                        d,
+                        tags, declaredUnmatched, declaredName);
+                    if (!declared.empty())
+                    {
+                        out = declared;
+                        source = "file";
+                    }
+                    else if (declaredUnmatched)
+                    {
+                        // The file said what it is and the configuration cannot
+                        // name it. Guessing from the extension rules here would
+                        // dress a wrong answer as a resolution -- an XYZ or
+                        // E-Gamut EXR shown as ACES2065-1 -- so nothing resolves
+                        // and the image is shown unmanaged. The label says so,
+                        // where a resolution would be shown.
+                        if (label)
+                        {
+                            *label = declaredName + " (not in the configuration)";
+                        }
+                        return out;
+                    }
+                    else if (d.config)
+                    {
+                    // A file that says nothing is what the configuration says it
+                    // is. Its file rules are taken whole, the default rule
+                    // included: that rule is the configuration's own answer for
+                    // everything else -- and, in a configuration without rules,
+                    // its default role -- so DJV agrees with the other
+                    // applications using the same configuration. Anyone who
+                    // wants another answer for an extension assigns one above.
+                    //
+                    // A name the configuration cannot resolve is not taken: a
+                    // version 1 configuration with no default role has a default
+                    // rule naming a role that is not there.
+                    try
+                    {
+                        const char* colorSpace =
+                            d.config->getColorSpaceFromFilepath(path.c_str());
+                        if (colorSpace &&
+                            colorSpace[0] &&
+                            d.config->getColorSpace(colorSpace))
+                        {
+                            out = colorSpace;
+                            source =
+                                d.config->filepathOnlyMatchesDefaultRule(path.c_str()) ?
+                                "default rule" :
+                                "file rules";
+                        }
+                    }
+                    catch (const std::exception&)
+                    {}
+                    // A configuration with no rules and no default role, as
+                    // Blender's is, answers as Blender does: byte images in its
+                    // default_byte role, float ones in default_float.
+                    if (out.empty())
+                    {
+                        try
+                        {
+                            const bool isFloat =
+                                ".exr" == ext || ".hdr" == ext || ".pfm" == ext || ".sxr" == ext;
+                            const char* role = isFloat ? "default_float" : "default_byte";
+                            if (d.config->hasRole(role))
+                            {
+                                if (const auto colorSpace = d.config->getColorSpace(role))
+                                {
+                                    out = colorSpace->getName();
+                                    source = std::string("role ") + role;
+                                }
+                            }
+                        }
+                        catch (const std::exception&)
+                        {}
+                    }
+                    }
+                }
+                if (label && !out.empty())
+                {
+                    *label = out + " (" + source + ")";
+                }
+    #endif // TLRENDER_OCIO
+                return out;
+            }
+        }
 
         void ColorModel::_init(
             const std::shared_ptr<ftk::Context>& context,
@@ -559,293 +871,171 @@ namespace djv
             }
         }
 
+
+        struct DisplayProcessor::Private
+        {
+#if defined(TLRENDER_OCIO)
+            OCIO::ConstConfigRcPtr config;
+#endif // TLRENDER_OCIO
+            std::string display;
+            std::string view;
+            std::string look;
+            std::map<std::string, std::string> extColorSpaces;
+            std::map<std::string, std::string> layerColorSpaces;
+            std::string viewInverse;
+            std::string key;
+            //! One processor for each input color space, made the first
+            //! time it is asked for.
+            mutable std::mutex mutex;
+#if defined(TLRENDER_OCIO)
+            mutable std::map<std::string, OCIO::ConstCPUProcessorRcPtr> processors;
+#endif // TLRENDER_OCIO
+        };
+
+        DisplayProcessor::DisplayProcessor() :
+            _p(new Private)
+        {}
+
+        DisplayProcessor::~DisplayProcessor()
+        {}
+
+        const std::string& DisplayProcessor::getKey() const
+        {
+            return _p->key;
+        }
+
+        bool DisplayProcessor::apply(
+            const std::string& path,
+            const ftk::ImageTags& tags,
+            float* rgba,
+            size_t count) const
+        {
+            FTK_P();
+            bool out = false;
+#if defined(TLRENDER_OCIO)
+            if (!p.config || 0 == count)
+                return out;
+            const std::string viewInverse = p.viewInverse;
+            const ResolveData d
+            {
+                p.config,
+                p.extColorSpaces,
+                p.layerColorSpaces,
+                [viewInverse] { return viewInverse; }
+            };
+            const std::string input = resolveInputWith(d, path, tags, nullptr);
+            if (input.empty())
+                return out;
+            OCIO::ConstCPUProcessorRcPtr processor;
+            {
+                std::unique_lock<std::mutex> lock(p.mutex);
+                const auto i = p.processors.find(input);
+                if (i != p.processors.end())
+                {
+                    processor = i->second;
+                }
+                else
+                {
+                    try
+                    {
+                        auto dvt = OCIO::DisplayViewTransform::Create();
+                        dvt->setSrc(input.c_str());
+                        dvt->setDisplay(p.display.c_str());
+                        dvt->setView(p.view.c_str());
+                        auto pipeline = OCIO::LegacyViewingPipeline::Create();
+                        pipeline->setDisplayViewTransform(dvt);
+                        if (!p.look.empty())
+                        {
+                            pipeline->setLooksOverrideEnabled(true);
+                            pipeline->setLooksOverride(p.look.c_str());
+                        }
+                        processor = pipeline->getProcessor(
+                            p.config,
+                            p.config->getCurrentContext())->getDefaultCPUProcessor();
+                    }
+                    catch (const std::exception&)
+                    {}
+                    // Kept even when it could not be made, so it is not
+                    // tried again for every thumbnail.
+                    p.processors[input] = processor;
+                }
+            }
+            if (processor)
+            {
+                try
+                {
+                    OCIO::PackedImageDesc desc(rgba, static_cast<long>(count), 1, 4);
+                    processor->apply(desc);
+                    out = true;
+                }
+                catch (const std::exception&)
+                {}
+            }
+#endif // TLRENDER_OCIO
+            return out;
+        }
+
+        std::shared_ptr<DisplayProcessor> ColorModel::getDisplayProcessor() const
+        {
+            FTK_P();
+            std::shared_ptr<DisplayProcessor> out;
+#if defined(TLRENDER_OCIO)
+            // As the viewport shows it: the view and the look it uses.
+            const tl::OCIOOptions& options = p.resolvedOCIOOptions->get();
+            if (!options.enabled || !p.ocioConfig)
+                return out;
+            out.reset(new DisplayProcessor);
+            auto& d = *out->_p;
+            d.config = p.ocioConfig;
+            try
+            {
+                d.display = !options.display.empty() ?
+                    options.display :
+                    std::string(p.ocioConfig->getDefaultDisplay());
+                d.view = !options.view.empty() ?
+                    options.view :
+                    std::string(p.ocioConfig->getDefaultView(d.display.c_str()));
+            }
+            catch (const std::exception&)
+            {
+                return nullptr;
+            }
+            d.look = options.look;
+            d.extColorSpaces = p.extColorSpaces->get();
+            d.layerColorSpaces = p.layerColorSpaces;
+            d.viewInverse = getViewInverseColorSpace();
+            std::stringstream ss;
+            ss << static_cast<int>(options.config) << ";" << options.fileName << ";" <<
+                d.display << ";" << d.view << ";" << d.look << ";" << d.viewInverse << ";";
+            for (const auto& i : d.extColorSpaces)
+            {
+                ss << i.first << "=" << i.second << ";";
+            }
+            for (const auto& i : d.layerColorSpaces)
+            {
+                ss << i.first << "=" << i.second << ";";
+            }
+            d.key = ss.str();
+#endif // TLRENDER_OCIO
+            return out;
+        }
+
         std::string ColorModel::_resolveInput(
             const std::string& path,
             const ftk::ImageTags& tags,
             std::string* label) const
         {
             FTK_P();
-            std::string out;
+            const ResolveData d
+            {
 #if defined(TLRENDER_OCIO)
-            std::string source;
-
-            // A timeline is a container of media in whatever color spaces
-            // they each are, so it has no input color space of its own; the
-            // clips resolve individually in the render. Resolving the
-            // container would paint every clip with the first clip's space,
-            // since that is where a timeline's metadata is borrowed from.
-            const std::string ext = ftk::toLower(ftk::Path(path).getExt());
-            if (".otio" == ext || ".otioz" == ext)
-            {
-                // Said rather than left blank, so that the resolved row does
-                // not simply vanish for a timeline. No one clip can be named
-                // instead: several tracks can make up the frame at once.
-                if (label)
-                {
-                    *label = "Per clip";
-                }
-                return out;
-            }
-
-            // A layer of a layer stack says what it is in the Layers tool,
-            // which is the most deliberate of all.
-            const auto layer = p.layerColorSpaces.find(getMediaKey(path));
-            // The user's own extension assignments come before what the
-            // file says and before the configuration's rules: they are set
-            // from inside DJV, so they are the most deliberate of the
-            // three.
-            const auto& extColorSpaces = p.extColorSpaces->get();
-            const auto i = extColorSpaces.find(ext);
-            const std::string layerColorSpace =
-                layer == p.layerColorSpaces.end() ? std::string() :
-                layer->second == getLayerViewInverseToken() ? getViewInverseColorSpace() :
-                layer->second;
-            if (!layerColorSpace.empty())
-            {
-                out = layerColorSpace;
-                source = layer->second == getLayerViewInverseToken() ?
-                    "layer, view inverse" :
-                    "layer";
-            }
-            else if (i != extColorSpaces.end() && !i->second.empty())
-            {
-                out = i->second;
-                source = "extension";
-            }
-            else if (bool declaredUnmatched = false; true)
-            {
-                std::string declaredName;
-                const std::string declared = _declaredColorSpace(
-                    tags, declaredUnmatched, declaredName);
-                if (!declared.empty())
-                {
-                    out = declared;
-                    source = "file";
-                }
-                else if (declaredUnmatched)
-                {
-                    // The file said what it is and the configuration cannot
-                    // name it. Guessing from the extension rules here would
-                    // dress a wrong answer as a resolution -- an XYZ or
-                    // E-Gamut EXR shown as ACES2065-1 -- so nothing resolves
-                    // and the image is shown unmanaged. The label says so,
-                    // where a resolution would be shown.
-                    if (label)
-                    {
-                        *label = declaredName + " (not in the configuration)";
-                    }
-                    return out;
-                }
-                else if (p.ocioConfig)
-                {
-                // A file that says nothing is what the configuration says it
-                // is. Its file rules are taken whole, the default rule
-                // included: that rule is the configuration's own answer for
-                // everything else -- and, in a configuration without rules,
-                // its default role -- so DJV agrees with the other
-                // applications using the same configuration. Anyone who
-                // wants another answer for an extension assigns one above.
-                //
-                // A name the configuration cannot resolve is not taken: a
-                // version 1 configuration with no default role has a default
-                // rule naming a role that is not there.
-                try
-                {
-                    const char* colorSpace =
-                        p.ocioConfig->getColorSpaceFromFilepath(path.c_str());
-                    if (colorSpace &&
-                        colorSpace[0] &&
-                        p.ocioConfig->getColorSpace(colorSpace))
-                    {
-                        out = colorSpace;
-                        source =
-                            p.ocioConfig->filepathOnlyMatchesDefaultRule(path.c_str()) ?
-                            "default rule" :
-                            "file rules";
-                    }
-                }
-                catch (const std::exception&)
-                {}
-                // A configuration with no rules and no default role, as
-                // Blender's is, answers as Blender does: byte images in its
-                // default_byte role, float ones in default_float.
-                if (out.empty())
-                {
-                    try
-                    {
-                        const bool isFloat =
-                            ".exr" == ext || ".hdr" == ext || ".pfm" == ext || ".sxr" == ext;
-                        const char* role = isFloat ? "default_float" : "default_byte";
-                        if (p.ocioConfig->hasRole(role))
-                        {
-                            if (const auto colorSpace = p.ocioConfig->getColorSpace(role))
-                            {
-                                out = colorSpace->getName();
-                                source = std::string("role ") + role;
-                            }
-                        }
-                    }
-                    catch (const std::exception&)
-                    {}
-                }
-                }
-            }
-            if (label && !out.empty())
-            {
-                *label = out + " (" + source + ")";
-            }
+                p.ocioConfig,
 #endif // TLRENDER_OCIO
-            return out;
-        }
-
-        std::string ColorModel::_declaredColorSpace(
-            const ftk::ImageTags& tags,
-            bool& declaredUnmatched,
-            std::string& declaredName) const
-        {
-            FTK_P();
-            std::string out;
-            declaredUnmatched = false;
-            declaredName = std::string();
-#if defined(TLRENDER_OCIO)
-            // What the file was flagged with, matched against the color
-            // spaces the configuration has. The names tried are the
-            // canonical names and aliases the OpenColorIO configurations
-            // use, so a configuration that renamed everything and carries
-            // no aliases simply does not match. Only the common video
-            // encodings are recognized; camera log material is almost never
-            // flagged.
-            if (p.ocioConfig)
-            {
-                std::vector<std::string> candidates;
-                bool declared = false;
-
-                // The OpenEXR 3.4 colorInteropID attribute is the file
-                // saying its color space by the color interop forum's
-                // names, which the configurations carry as aliases -- the
-                // most direct declaration there is, so it comes first.
-                if (const auto i = tags.find("colorInteropID");
-                    i != tags.end() && !i->second.empty())
-                {
-                    candidates.push_back(i->second);
-                    declared = true;
-                    declaredName = i->second;
-                }
-
-                // EXR files carry their primaries in the header, exact
-                // for the standard sets and measured for everything else.
-                // The tolerance is generous: primaries near a standard set
-                // are that set within a small error, while falling through
-                // to a configuration rule written for the extension risks
-                // a gross one -- a camera characterization near Rec.709
-                // shown as ACES2065-1 is unrecognizable. The standard sets
-                // are about 0.04 apart at their closest, so the tolerance
-                // cannot confuse two of them.
-                if (const auto i = tags.find("Chromaticities");
-                    i != tags.end() && candidates.empty())
-                {
-                    declared = true;
-                    // Named after the standard set when one matches below;
-                    // primaries the tables do not know keep this.
-                    declaredName = "chromaticities";
-                    float c[8] = { 0.F };
-                    std::stringstream ss(i->second);
-                    for (size_t j = 0; j < 8; ++j)
-                    {
-                        ss >> c[j];
-                    }
-                    struct Primaries
-                    {
-                        float c[8];
-                        std::vector<std::string> candidates;
-                    };
-                    const std::vector<Primaries> known =
-                    {
-                        { { .64F, .33F, .3F, .6F, .15F, .06F, .3127F, .329F },
-                            { "lin_rec709", "lin_srgb", "Linear Rec.709 (sRGB)",
-                              "Linear Rec.709" } },
-                        { { .68F, .32F, .265F, .69F, .15F, .06F, .3127F, .329F },
-                            { "lin_p3d65", "Linear P3-D65" } },
-                        { { .708F, .292F, .17F, .797F, .131F, .046F, .3127F, .329F },
-                            { "lin_rec2020", "Linear Rec.2020" } },
-                        { { .7347F, .2653F, 0.F, 1.F, .0001F, -.077F, .32168F, .33767F },
-                            { "aces2065_1", "ACES2065-1" } },
-                        { { .713F, .293F, .165F, .83F, .128F, .044F, .32168F, .33767F },
-                            { "acescg", "ACEScg" } }
-                    };
-                    for (const auto& k : known)
-                    {
-                        bool match = true;
-                        for (size_t j = 0; j < 8 && match; ++j)
-                        {
-                            match = std::abs(c[j] - k.c[j]) < .02F;
-                        }
-                        if (match)
-                        {
-                            candidates = k.candidates;
-                            declaredName = k.candidates.front();
-                            break;
-                        }
-                    }
-                }
-
-                // An OpenEXR that declares nothing is not given the format's
-                // default, linear Rec.709, here: that would outrank the
-                // configuration, which knows the pipeline the file came from
-                // where the format can only guess. It falls through to the
-                // file rules instead.
-
-                std::string primaries;
-                std::string transfer;
-                if (const auto i = tags.find("Color Primaries");
-                    i != tags.end())
-                {
-                    primaries = i->second;
-                }
-                if (const auto i = tags.find("Color Transfer");
-                    i != tags.end())
-                {
-                    transfer = i->second;
-                }
-                if ("bt709" == primaries && "iec61966-2-1" == transfer)
-                {
-                    candidates = { "srgb_tx", "sRGB - Texture", "sRGB" };
-                }
-                else if ("bt709" == primaries && "bt709" == transfer)
-                {
-                    candidates =
-                    {
-                        "rec1886_rec709_display",
-                        "Rec.1886 Rec.709 - Display",
-                        "Rec.709"
-                    };
-                }
-                else if ("bt2020" == primaries && "smpte2084" == transfer)
-                {
-                    candidates = { "rec2100_pq_display", "Rec.2100-PQ - Display" };
-                }
-                else if ("bt2020" == primaries && "arib-std-b67" == transfer)
-                {
-                    candidates = { "rec2100_hlg_display", "Rec.2100-HLG - Display" };
-                }
-                for (const auto& candidate : candidates)
-                {
-                    try
-                    {
-                        if (const auto colorSpace =
-                            p.ocioConfig->getColorSpace(candidate.c_str()))
-                        {
-                            out = colorSpace->getName();
-                            break;
-                        }
-                    }
-                    catch (const std::exception&)
-                    {}
-                }
-                declaredUnmatched = declared && out.empty();
-            }
-#endif // TLRENDER_OCIO
-            return out;
+                p.extColorSpaces->get(),
+                p.layerColorSpaces,
+                [this] { return getViewInverseColorSpace(); }
+            };
+            return resolveInputWith(d, path, tags, label);
         }
 
         void ColorModel::_ocioConfigUpdate(const tl::OCIOOptions& options)

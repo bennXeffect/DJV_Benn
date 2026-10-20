@@ -336,6 +336,7 @@ namespace djv
                 }
             }
             p.colorModel->setLayerColorSpaces(colorSpaces);
+            _thumbnailColorUpdate();
             p.layerStack->setIfChanged(stack);
         }
     }

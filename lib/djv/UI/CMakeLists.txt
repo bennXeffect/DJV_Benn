@@ -22,6 +22,7 @@ set(HEADERS
     PixelLoupe.h
     PixelProbe.h
     ScopesWidget.h
+    ThumbnailColor.h
     ViewWidgets.h
     Viewport.h
     ViewportBinding.h)
@@ -55,6 +56,7 @@ set(SOURCE
     PixelProbe.cpp
     RemoteSession.cpp
     ScopesWidget.cpp
+    ThumbnailColor.cpp
     ViewWidgets.cpp
     Viewport.cpp
     ViewportBinding.cpp)

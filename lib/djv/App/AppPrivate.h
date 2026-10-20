@@ -183,6 +183,8 @@ namespace djv
             std::shared_ptr<ftk::ListObserver<std::string> > mediaReferenceKeysModifiedObserver;
             std::shared_ptr<ftk::Observer<tl::CompareTime> > compareTimeModifiedObserver;
             std::shared_ptr<ftk::Observer<tl::OCIOOptions> > ocioLogObserver;
+            std::shared_ptr<ftk::Observer<tl::OCIOOptions> > thumbnailColorObserver;
+            std::shared_ptr<ftk::Observer<std::map<std::string, std::string> > > thumbnailExtObserver;
             std::shared_ptr<ftk::Observer<tl::LUTOptions> > lutLogObserver;
             std::shared_ptr<ftk::Observer<tl::OCIOOptions> > ocioModifiedObserver;
             std::shared_ptr<ftk::Observer<tl::LUTOptions> > lutModifiedObserver;

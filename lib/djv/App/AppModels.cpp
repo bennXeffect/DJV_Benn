@@ -2,12 +2,14 @@
 // Copyright Contributors to the DJV project.
 
 #include <djv/App/AppPrivate.h>
+#include <djv/UI/ThumbnailColor.h>
 #include <djv/UI/Viewport.h>
 #include <djv/App/MainWindow.h>
 #include <djv/App/SecondaryWindow.h>
 #include <djv/Models/SettingsKeys.h>
 #include <djv/Models/Playlist.h>
 #include <tlRender/IO/USD.h>
+#include <tlRender/UI/ThumbnailSystem.h>
 #include <ftk/UI/FileBrowser.h>
 
 #include <djv/UI/ColorResetDialog.h>
@@ -689,6 +691,22 @@ namespace djv
                                 str() :
                             std::string("OCIO: off"));
                 });
+            // The thumbnails shown as the picture is, through the same
+            // color options; the extension assignments are among what
+            // resolves a file's input.
+            p.thumbnailColorObserver = ftk::Observer<tl::OCIOOptions>::create(
+                p.colorModel->observeResolvedOCIOOptions(),
+                [this](const tl::OCIOOptions&)
+                {
+                    _thumbnailColorUpdate();
+                });
+            p.thumbnailExtObserver = ftk::Observer<std::map<std::string, std::string> >::create(
+                p.colorModel->observeExtColorSpaces(),
+                [this](const std::map<std::string, std::string>&)
+                {
+                    _thumbnailColorUpdate();
+                });
+
             p.lutLogObserver = ftk::Observer<tl::LUTOptions>::create(
                 p.colorModel->observeLUTOptions(),
                 [this](const tl::LUTOptions& value)
@@ -902,6 +920,18 @@ namespace djv
                 }
                 player->setChannelMute(channelMute);
                 player->setAudioOffset(p.audioModel->getSyncOffset());
+            }
+        }
+
+        void App::_thumbnailColorUpdate()
+        {
+            FTK_P();
+            if (auto thumbnailSystem = _context->getSystem<tl::ui::ThumbnailSystem>())
+            {
+                const auto processor = p.colorModel->getDisplayProcessor();
+                thumbnailSystem->setColor(
+                    ui::getThumbnailColor(processor),
+                    processor ? processor->getKey() : std::string());
             }
         }
     }

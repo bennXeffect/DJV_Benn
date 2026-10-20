@@ -8,10 +8,12 @@
 #include <tlRender/Timeline/ColorOptions.h>
 
 #include <ftk/Core/Image.h>
+#include <ftk/Core/Util.h>
 #include <ftk/Core/Observable.h>
 #include <ftk/Core/ObservableList.h>
 
 #include <map>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -26,6 +28,41 @@ namespace djv
     namespace models
     {
         //! Color model.
+        class ColorModel;
+
+        //! Turns file values into displayed values on the CPU, as the
+        //! viewport shows them: the input color space resolved for each
+        //! file, then the display, the view and the look. For thumbnails,
+        //! made on threads of their own, which the model is not safe for:
+        //! what it reads is copied when it is made.
+        class DJV_MODELS_API_TYPE DisplayProcessor
+        {
+            FTK_NON_COPYABLE(DisplayProcessor);
+
+        protected:
+            DisplayProcessor();
+
+        public:
+            DJV_MODELS_API ~DisplayProcessor();
+
+            //! Apply to packed RGBA float pixels of the file at the path,
+            //! its image tags saying what it is. False, and the pixels as
+            //! they were, when nothing resolves for it.
+            DJV_MODELS_API bool apply(
+                const std::string& path,
+                const ftk::ImageTags&,
+                float* rgba,
+                size_t count) const;
+
+            //! A name for what it does, for a cache key.
+            DJV_MODELS_API const std::string& getKey() const;
+
+        private:
+            friend class ColorModel;
+
+            FTK_PRIVATE();
+        };
+
         class DJV_MODELS_API_TYPE ColorModel : public std::enable_shared_from_this<ColorModel>
         {
             FTK_NON_COPYABLE(ColorModel);
@@ -129,6 +166,11 @@ namespace djv
             //! is none.
             DJV_MODELS_API std::string getViewInverseColorSpace() const;
 
+            //! Get a processor that shows file values as the viewport does,
+            //! for threads; null when color is not managed. Made again for
+            //! a change of the options, which its key follows.
+            DJV_MODELS_API std::shared_ptr<DisplayProcessor> getDisplayProcessor() const;
+
             //! Get the folders searched for Blender installations, besides
             //! the usual places.
             DJV_MODELS_API const std::vector<std::string>& getBlenderDirs() const;
@@ -156,15 +198,6 @@ namespace djv
                 const std::string& path,
                 const ftk::ImageTags&,
                 std::string* label) const;
-            //! declaredUnmatched is set when the file declares its color
-            //! -- a colorInteropID, chromaticities -- but the configuration
-            //! has no matching space: an explicit declaration that cannot be
-            //! honoured must not be papered over by an extension rule.
-            //! declaredName is what the file declared, for saying so.
-            std::string _declaredColorSpace(
-                const ftk::ImageTags&,
-                bool& declaredUnmatched,
-                std::string& declaredName) const;
             void _ocioConfigUpdate(const tl::OCIOOptions&);
 
             FTK_PRIVATE();

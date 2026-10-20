@@ -400,6 +400,8 @@ namespace djv
             void _reload(bool restructured, bool keepCache = false);
             void _autoReload();
             void _reloadUpdate(const std::shared_ptr<models::FilesModelItem>&);
+            //! Thumbnails color managed as the viewport shows the picture.
+            void _thumbnailColorUpdate();
             void _layersUpdate(const std::vector<int>&);
             void _mediaReferenceKeysUpdate(const std::vector<std::string>&);
             void _mediaReferenceWarning(const models::FilesModelItem&, const std::string&);
