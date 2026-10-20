@@ -394,7 +394,10 @@ namespace djv
             // Reopen the active files. When the timeline is about to be a
             // different shape, the position and the in/out range cannot be
             // carried over as they are, since both are in timeline time.
-            void _reload(bool restructured);
+            //! Reload the active files. With keepCache, a sequence that only
+            //! grew -- frames added after the ones it had, as a render writes
+            //! them -- keeps the frames decoded and the thumbnails made.
+            void _reload(bool restructured, bool keepCache = false);
             void _autoReload();
             void _reloadUpdate(const std::shared_ptr<models::FilesModelItem>&);
             void _layersUpdate(const std::vector<int>&);

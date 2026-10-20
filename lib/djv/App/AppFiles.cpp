@@ -475,13 +475,48 @@ namespace djv
             if (found.getFrames() != path.getFrames() ||
                 found.getSeqSize() != path.getSeqSize())
             {
-                reload();
+                // Grown, as a render writes it: it starts where it did, and
+                // every frame it had is still there. Then what was read of
+                // it is still good, and only the new frames are read.
+                const auto& framesBefore = path.getSeq();
+                const auto& framesAfter = found.getSeq();
+                bool grown =
+                    !framesBefore.empty() &&
+                    !framesAfter.empty() &&
+                    framesBefore.front().range.min() == framesAfter.front().range.min();
+                for (size_t i = 0; grown && i < framesBefore.size(); ++i)
+                {
+                    const auto& range = framesBefore[i].range;
+                    for (int64_t frame = range.min(); grown && frame <= range.max(); frame += std::max(1, framesBefore[i].inc))
+                    {
+                        bool in = false;
+                        for (const auto& j : framesAfter)
+                        {
+                            if (frame >= j.range.min() && frame <= j.range.max())
+                            {
+                                in = true;
+                                break;
+                            }
+                        }
+                        grown = in;
+                    }
+                }
+                _reload(false, grown);
             }
         }
 
-        void App::_reload(bool restructured)
+        void App::_reload(bool restructured, bool keepCache)
         {
             FTK_P();
+            // What the player has read, for the one that replaces it.
+            std::map<OTIO_NS::RationalTime, std::vector<tl::VideoFrame> > videoCache;
+            if (keepCache)
+            {
+                if (auto player = p.player->get())
+                {
+                    videoCache = player->getVideoCache();
+                }
+            }
             const auto activeFiles = p.activeFiles;
             const auto files = p.files;
             for (const auto& i : activeFiles)
@@ -529,11 +564,24 @@ namespace djv
                 }
             }
 
-            auto thumbnailSytem = _context->getSystem<tl::ui::ThumbnailSystem>();
-            thumbnailSytem->clearCache();
+            // The thumbnails of a sequence's frames are of the frames' files,
+            // which a sequence growing leaves as they were.
+            if (!keepCache)
+            {
+                auto thumbnailSytem = _context->getSystem<tl::ui::ThumbnailSystem>();
+                thumbnailSytem->clearCache();
+            }
 
             _filesUpdate(files);
             _activeUpdate(activeFiles);
+
+            if (!videoCache.empty())
+            {
+                if (auto player = p.player->get())
+                {
+                    player->addVideoCache(videoCache);
+                }
+            }
 
             // The items are the same objects holding different things now --
             // a reload finds the frames again, so the range can have changed

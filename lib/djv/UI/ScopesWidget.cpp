@@ -106,7 +106,56 @@ namespace djv
                 std::shared_ptr<ftk::Image> histogram;
                 std::shared_ptr<ftk::Image> waveform;
                 std::shared_ptr<ftk::Image> vectorscope;
+                //! The scale the histogram and the waveform are drawn to: zero
+                //! to one, or with values past one -- the file values of a
+                //! scene-linear render -- a log scale up to the power of two
+                //! at or above the brightest, so the highlights are in it
+                //! and the shadows not squeezed into the bottom.
+                bool log = false;
+                float rangeMax = 1.F;
+                float maxValue = 0.F;
             };
+
+            //! Where a value falls on the scale, from zero to one.
+            float scopeScale(float value, bool log, float rangeMax)
+            {
+                if (!std::isfinite(value))
+                {
+                    return value > 0.F ? 1.F : 0.F;
+                }
+                if (!log)
+                {
+                    return std::clamp(value, 0.F, 1.F);
+                }
+                return std::clamp(
+                    std::log2(1.F + std::max(value, 0.F)) / std::log2(1.F + rangeMax),
+                    0.F,
+                    1.F);
+            }
+
+            //! The values the scale is marked with.
+            std::vector<float> scopeMarks(bool log, float rangeMax)
+            {
+                if (!log)
+                {
+                    return { 0.F, .25F, .5F, .75F, 1.F };
+                }
+                std::vector<float> out = { 0.F, .18F, .5F, 1.F };
+                for (float v = 2.F; v <= rangeMax; v *= 2.F)
+                {
+                    out.push_back(v);
+                }
+                return out;
+            }
+
+            std::string scopeMarkLabel(float value)
+            {
+                if (value >= 1.F || 0.F == value)
+                {
+                    return ftk::Format("{0}").arg(static_cast<int>(std::lround(value)));
+                }
+                return ftk::Format("{0}").arg(value, 2);
+            }
 
             //! Measures the frame: run off the main thread, where it held
             //! playback up -- with the display transform applied on the CPU,
@@ -168,8 +217,32 @@ namespace djv
                 }
 #endif // TLRENDER_OCIO
 
-                // Histogram: the red, green and blue counts over the range from
-                // zero to one, values past it in the last bin.
+                // The brightest value, which sets the scale.
+                for (size_t i = 0; i < count; ++i)
+                {
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        const float v = values[i * 4 + k];
+                        if (std::isfinite(v))
+                        {
+                            out.maxValue = std::max(out.maxValue, v);
+                        }
+                    }
+                }
+                if (out.maxValue > 1.0001F)
+                {
+                    out.log = true;
+                    out.rangeMax = std::min(
+                        65536.F,
+                        std::exp2(std::ceil(std::log2(out.maxValue))));
+                }
+                const auto scale = [&out](float value)
+                {
+                    return scopeScale(value, out.log, out.rangeMax);
+                };
+
+                // Histogram: the red, green and blue counts over the scale,
+                // values past it in the last bin.
                 std::vector<int> hist(256 * 3, 0);
                 // Waveform: the value of each channel by column.
                 std::vector<int> wave(static_cast<size_t>(waveformW) * waveformH * 3, 0);
@@ -181,7 +254,7 @@ namespace djv
                     const int wx = std::min(waveformW - 1, xs[i] * waveformW / w);
                     for (int k = 0; k < 3; ++k)
                     {
-                        const float c = std::clamp(v[k], 0.F, 1.F);
+                        const float c = scale(v[k]);
                         ++hist[k * 256 + std::min(255, static_cast<int>(c * 255.F + .5F))];
                         const int wy = std::min(waveformH - 1, static_cast<int>(c * (waveformH - 1) + .5F));
                         ++wave[(static_cast<size_t>(wy) * waveformW + wx) * 3 + k];
@@ -300,6 +373,9 @@ namespace djv
             std::shared_ptr<ftk::Image> histogram;
             std::shared_ptr<ftk::Image> waveform;
             std::shared_ptr<ftk::Image> vectorscope;
+            bool scaleLog = false;
+            float scaleRangeMax = 1.F;
+            float maxValue = 0.F;
 
             std::array<float, 3> heights = drawHDefault;
             std::function<void(const std::array<float, 3>&)> heightsCallback;
@@ -485,6 +561,9 @@ namespace djv
                 p.histogram = result.histogram;
                 p.waveform = result.waveform;
                 p.vectorscope = result.vectorscope;
+                p.scaleLog = result.log;
+                p.scaleRangeMax = result.rangeMax;
+                p.maxValue = result.maxValue;
                 setDrawUpdate();
             }
             const auto now = std::chrono::steady_clock::now();
@@ -529,6 +608,12 @@ namespace djv
 
             const std::string sourceLabel = ScopesSource::Display == p.source ?
                 " (display)" : " (file values)";
+            // Past one, the scale is a log one: said, with how bright.
+            const std::string rangeLabel = p.scaleLog ?
+                std::string(ftk::Format(", log, max {0}").arg(p.maxValue, 2)) :
+                std::string();
+            const ftk::Color4F markColor = event.style->getColorRole(ftk::ColorRole::TextDisabled);
+            const std::vector<float> marks = scopeMarks(p.scaleLog, p.scaleRangeMax);
             int y = g.min.y;
             const auto title = [&](int index, const std::string& text)
             {
@@ -586,39 +671,80 @@ namespace djv
 
             // Histogram.
             y = boxes[0].min.y - line - p.size.spacing;
-            title(0, "Histogram" + sourceLabel);
+            title(0, "Histogram" + sourceLabel + rangeLabel);
             ftk::Box2I box;
             if (!p.collapsed[0])
             {
                 box = boxes[0];
                 event.render->drawRect(box, bgColor);
-                for (int i = 1; i < 4; ++i)
-                {
-                    const int x = box.min.x + box.w() * i / 4;
-                    event.render->drawRect(ftk::Box2I(x, box.min.y, p.size.border, box.h()), gridColor);
-                }
                 if (p.histogram)
                 {
                     event.render->drawImage(p.histogram, box, ftk::Color4F(1.F, 1.F, 1.F), imageOptions);
+                }
+                // A line at each mark of the scale, and its number where
+                // there is room for it, over the bars.
+                {
+                    int lastLabelX = box.min.x - 1000;
+                    for (const float mark : marks)
+                    {
+                        const int x = box.min.x + static_cast<int>(
+                            scopeScale(mark, p.scaleLog, p.scaleRangeMax) * (box.w() - 1));
+                        if (mark > 0.F)
+                        {
+                            event.render->drawRect(ftk::Box2I(x, box.min.y, p.size.border, box.h()), gridColor);
+                        }
+                        const std::string label = scopeMarkLabel(mark);
+                        const ftk::Size2I size = event.fontSystem->getSize(label, p.size.fontInfo);
+                        const int lx = std::min(x + p.size.border * 2, box.max.x - size.w);
+                        if (lx >= lastLabelX)
+                        {
+                            event.render->drawText(
+                                event.fontSystem->getGlyphs(label, p.size.fontInfo),
+                                p.size.fontMetrics,
+                                ftk::V2I(lx, box.max.y - line),
+                                markColor);
+                            lastLabelX = lx + size.w + p.size.spacing;
+                        }
+                    }
                 }
                 grip(0, box);
             }
 
             // Waveform.
             y = boxes[1].min.y - line - p.size.spacing;
-            title(1, "Waveform" + sourceLabel);
+            title(1, "Waveform" + sourceLabel + rangeLabel);
             if (!p.collapsed[1])
             {
                 box = boxes[1];
                 event.render->drawRect(box, bgColor);
-                for (int i = 1; i < 4; ++i)
-                {
-                    const int yy = box.min.y + box.h() * i / 4;
-                    event.render->drawRect(ftk::Box2I(box.min.x, yy, box.w(), p.size.border), gridColor);
-                }
                 if (p.waveform)
                 {
                     event.render->drawImage(p.waveform, box, ftk::Color4F(1.F, 1.F, 1.F), imageOptions);
+                }
+                // A line at each mark of the scale, and its number above it
+                // -- under it at the top -- where there is room for it.
+                {
+                    int lastLabelY = box.max.y + 1000;
+                    for (const float mark : marks)
+                    {
+                        const int yy = box.max.y - static_cast<int>(
+                            scopeScale(mark, p.scaleLog, p.scaleRangeMax) * (box.h() - 1));
+                        if (mark > 0.F)
+                        {
+                            event.render->drawRect(ftk::Box2I(box.min.x, yy, box.w(), p.size.border), gridColor);
+                        }
+                        const int ly = std::clamp(yy - line, box.min.y, std::max(box.min.y, box.max.y - line));
+                        if (ly + line <= lastLabelY)
+                        {
+                            const std::string label = scopeMarkLabel(mark);
+                            event.render->drawText(
+                                event.fontSystem->getGlyphs(label, p.size.fontInfo),
+                                p.size.fontMetrics,
+                                ftk::V2I(box.min.x + p.size.border * 2, ly),
+                                markColor);
+                            lastLabelY = ly;
+                        }
+                    }
                 }
                 grip(1, box);
             }
