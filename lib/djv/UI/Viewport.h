@@ -98,9 +98,9 @@ namespace djv
             //! comes back after.
             DJV_UI_API void setPresentView(bool);
 
-            //! Home in the present view: a picture smaller than the screen
-            //! filled or at its own pixels, by turns; a larger one fitted
-            //! again. False outside the present view.
+            //! Home in the present view: the picture filling the screen as
+            //! best it can, or at its own pixels, by turns, centered. False
+            //! outside the present view.
             DJV_UI_API bool presentHome();
 
             //! Set whether the heads up display is shown at all. Separate from
@@ -168,6 +168,10 @@ namespace djv
             void _probeAt(const ftk::V2I& windowPos);
             void _probeMove(const ftk::V2F&);
             void _presentViewUpdate();
+            void _presentShow();
+            void _presentCenter(double zoom);
+            double _presentFit() const;
+            double _presentZoomMin() const;
             void _shuttleMove(const ftk::V2F&);
             void _shuttleEnd();
             void _log(const std::string&);
