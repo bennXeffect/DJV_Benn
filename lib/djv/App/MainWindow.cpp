@@ -835,6 +835,7 @@ namespace djv
                 }
                 setFullScreen(value);
                 _windowUpdate();
+                p.viewport->setPresentView(value);
                 if (value && wasFullScreen)
                 {
                     _presentHint();

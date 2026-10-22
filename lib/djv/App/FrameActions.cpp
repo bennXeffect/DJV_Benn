@@ -5,6 +5,7 @@
 
 #include <djv/App/App.h>
 #include <djv/App/MainWindow.h>
+#include <djv/UI/Viewport.h>
 
 namespace djv
 {
@@ -33,6 +34,16 @@ namespace djv
                 {
                     if (auto app = appWeak.lock())
                     {
+                        // In presentation mode Home is the view's, as in
+                        // Blender: fitted again, or a small picture filled
+                        // or at its own pixels.
+                        if (auto mainWindow = app->getMainWindow())
+                        {
+                            if (mainWindow->getViewport()->presentHome())
+                            {
+                                return;
+                            }
+                        }
                         if (auto player = app->observePlayer()->get())
                         {
                             player->gotoStart();

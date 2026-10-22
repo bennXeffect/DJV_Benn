@@ -290,6 +290,15 @@ namespace djv
             };
             PlaybackStats playbackStats;
 
+            //! The present view: on, a picture smaller than the screen
+            //! filled rather than at its own pixels, and the view it came
+            //! from.
+            bool presentView = false;
+            bool presentFill = false;
+            bool presentFrameViewPrev = true;
+            std::pair<ftk::V2I, double> presentViewPrev;
+            std::shared_ptr<ftk::Observer<std::pair<ftk::V2I, double> > > presentObserver;
+
             //! The stroke being drawn, in the image pixels of its source.
             models::ReviewStroke stroke;
             int strokeSource = -1;
@@ -806,7 +815,17 @@ namespace djv
                             }
                         }
                         p.videoFramesSize = value.size();
+                        const bool sizeChanged =
+                            p.videoFrames.empty() != value.empty() ||
+                            (!value.empty() && !p.videoFrames.empty() &&
+                                !value.front().layers.empty() && !p.videoFrames.front().layers.empty() &&
+                                value.front().layers.front().image && p.videoFrames.front().layers.front().image &&
+                                value.front().layers.front().image->getInfo().size != p.videoFrames.front().layers.front().image->getInfo().size);
                         p.videoFrames = value;
+                        if (sizeChanged)
+                        {
+                            _presentViewUpdate();
+                        }
                         p.binding->setVideoFramesSize(value.size());
                         _compareUpdate();
                         p.missing = false;
@@ -897,10 +916,108 @@ namespace djv
             return _p->hudLayout->getSizeHint();
         }
 
+        void Viewport::setPresentView(bool value)
+        {
+            FTK_P();
+            if (value == p.presentView)
+                return;
+            p.presentView = value;
+            if (value)
+            {
+                p.presentFill = false;
+                p.presentFrameViewPrev = hasFrameView();
+                p.presentViewPrev = getViewPosAndZoom();
+                // Framed by the present view itself rather than the frame
+                // view, which would blow a small picture up to the screen.
+                setFrameView(false);
+                p.presentObserver = ftk::Observer<std::pair<ftk::V2I, double> >::create(
+                    observeViewPosAndZoom(),
+                    [this](const std::pair<ftk::V2I, double>&)
+                    {
+                        _presentViewUpdate();
+                    });
+                // Held from the start, wherever the view was.
+                setViewPosAndZoom(ftk::V2I(), 0.0);
+                _presentViewUpdate();
+            }
+            else
+            {
+                p.presentObserver.reset();
+                setZoomRange(ftk::RangeD(.01, 512.0));
+                setViewPosAndZoom(p.presentViewPrev.first, p.presentViewPrev.second);
+                setFrameView(p.presentFrameViewPrev);
+            }
+        }
+
+        bool Viewport::presentHome()
+        {
+            FTK_P();
+            if (!p.presentView)
+                return false;
+            const ftk::Size2I renderSize = tl::getRenderSize(
+                getCompareOptions(),
+                p.binding->getDisplayOptions().aspectRatio,
+                p.videoFrames);
+            const ftk::Box2I& g = getGeometry();
+            if (renderSize.isValid() && g.w() > 0 && g.h() > 0)
+            {
+                const double fit = std::min(
+                    g.w() / static_cast<double>(renderSize.w),
+                    g.h() / static_cast<double>(renderSize.h));
+                if (fit > 1.0)
+                {
+                    p.presentFill = !p.presentFill;
+                }
+            }
+            // Held again, at the size it is held at.
+            setZoomRange(ftk::RangeD(.01, 512.0));
+            setViewPosAndZoom(ftk::V2I(), 0.0);
+            _presentViewUpdate();
+            return true;
+        }
+
+        void Viewport::_presentViewUpdate()
+        {
+            FTK_P();
+            if (!p.presentView)
+                return;
+            const ftk::Size2I renderSize = tl::getRenderSize(
+                getCompareOptions(),
+                p.binding->getDisplayOptions().aspectRatio,
+                p.videoFrames);
+            const ftk::Box2I& g = getGeometry();
+            if (!renderSize.isValid() || g.w() <= 0 || g.h() <= 0)
+                return;
+            // The smallest it can be: fitted to the screen, or a picture
+            // smaller than the screen at its own pixels unless filled.
+            const double fit = std::min(
+                g.w() / static_cast<double>(renderSize.w),
+                g.h() / static_cast<double>(renderSize.h));
+            const double zoomMin = fit <= 1.0 || p.presentFill ? fit : 1.0;
+            if (getZoomRange().min() != zoomMin)
+            {
+                setZoomRange(ftk::RangeD(zoomMin, 512.0));
+            }
+            // At that size it is held, centered; above it, it moves freely.
+            const auto viewPosAndZoom = getViewPosAndZoom();
+            if (viewPosAndZoom.second <= zoomMin * 1.0001)
+            {
+                const ftk::V2I pos(
+                    g.w() / 2.F - renderSize.w / 2 * zoomMin,
+                    g.h() / 2.F - renderSize.h / 2 * zoomMin);
+                if (pos != viewPosAndZoom.first || zoomMin != viewPosAndZoom.second)
+                {
+                    setViewPosAndZoom(pos, zoomMin);
+                }
+            }
+        }
+
         void Viewport::setGeometry(const ftk::Box2I& value)
         {
             tl::ui::Viewport::setGeometry(value);
             FTK_P();
+            // The screen it is held to may have changed.
+            _presentViewUpdate();
             p.hudLayout->setGeometry(value);
             if (p.probing)
             {

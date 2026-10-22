@@ -89,6 +89,20 @@ namespace djv
             //! it is what to do next, e.g., how to leave presentation mode.
             DJV_UI_API void showHint(const std::string&);
 
+            //! Set the present view, for presentation mode, as Blender's
+            //! maximized editor shows a render: the picture fitted to the
+            //! screen and centered, held there; zoomed in, it moves freely,
+            //! and zoomed back out it is held again. It cannot be made
+            //! smaller than the screen -- or, a picture smaller than the
+            //! screen, than its own pixels, unless filled. The view before
+            //! comes back after.
+            DJV_UI_API void setPresentView(bool);
+
+            //! Home in the present view: a picture smaller than the screen
+            //! filled or at its own pixels, by turns; a larger one fitted
+            //! again. False outside the present view.
+            DJV_UI_API bool presentHome();
+
             //! Set whether the heads up display is shown at all. Separate from
             //! the display's own options so that turning it off for
             //! presentation does not forget what was being shown.
@@ -153,6 +167,7 @@ namespace djv
             void _loupeGeometry();
             void _probeAt(const ftk::V2I& windowPos);
             void _probeMove(const ftk::V2F&);
+            void _presentViewUpdate();
             void _shuttleMove(const ftk::V2F&);
             void _shuttleEnd();
             void _log(const std::string&);

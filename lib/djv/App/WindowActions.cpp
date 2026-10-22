@@ -266,7 +266,8 @@ namespace djv
 
             // Register the shortcuts.
             _addShortcut("FullScreen", ftk::Key::U);
-            _addShortcut("PresentMode", "Presentation Mode", ftk::KeyShortcut(ftk::Key::P, static_cast<int>(ftk::KeyModifier::Control)));
+            // Ctrl+Space, as Blender's maximized editor.
+            _addShortcut("PresentMode", "Presentation Mode", ftk::KeyShortcut(ftk::Key::Space, static_cast<int>(ftk::KeyModifier::Control)));
             _addShortcut("FloatOnTop");
             _addShortcut("Secondary", ftk::Key::Y);
             _addShortcut("FileToolBar");
