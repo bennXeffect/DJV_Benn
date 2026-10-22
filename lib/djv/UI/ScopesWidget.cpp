@@ -390,6 +390,7 @@ namespace djv
             std::function<void(const std::array<bool, 3>&)> collapsedCallback;
             //! A press on a title toggles that scope, and a drag from it
             //! gives each title it crosses the same state.
+            bool overlay = false;
             int titlePressed = -1;
             bool titleDragCollapsed = false;
             //! The measurement running, one at a time; a frame that comes
@@ -597,6 +598,19 @@ namespace djv
         {
             IWidget::drawEvent(drawRect, event);
             FTK_P();
+            if (p.overlay)
+            {
+                // The waveform alone, over the picture, at half opacity.
+                const ftk::Box2I& g = getGeometry();
+                event.render->drawRect(g, ftk::Color4F(0.F, 0.F, 0.F, .5F));
+                if (p.waveform)
+                {
+                    ftk::ImageOptions imageOptions;
+                    imageOptions.cache = false;
+                    event.render->drawImage(p.waveform, g, ftk::Color4F(1.F, 1.F, 1.F, .5F), imageOptions);
+                }
+                return;
+            }
             const ftk::Box2I g = ftk::margin(getGeometry(), -p.size.margin);
             const int line = p.size.fontMetrics.lineHeight;
             const auto boxes = _boxes();
@@ -831,6 +845,13 @@ namespace djv
             setDrawUpdate();
         }
 
+        void ScopesWidget::setOverlay(bool value)
+        {
+            FTK_P();
+            p.overlay = value;
+            setDrawUpdate();
+        }
+
         void ScopesWidget::setCollapsedCallback(const std::function<void(const std::array<bool, 3>&)>& value)
         {
             _p->collapsedCallback = value;
@@ -924,6 +945,8 @@ namespace djv
         {
             IWidget::mouseMoveEvent(event);
             FTK_P();
+            if (p.overlay)
+                return;
             if (p.titlePressed >= 0)
             {
                 event.accept = true;
@@ -961,6 +984,8 @@ namespace djv
         {
             IWidget::mousePressEvent(event);
             FTK_P();
+            if (p.overlay)
+                return;
             if (ftk::MouseButton::Left == event.button)
             {
                 const int titleIndex = _titleAt(event.pos);

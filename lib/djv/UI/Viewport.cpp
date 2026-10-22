@@ -6,6 +6,7 @@
 #include <djv/UI/PixelLoupe.h>
 #include <djv/UI/PixelProbe.h>
 #include <djv/UI/RemoteSession.h>
+#include <djv/UI/ScopesWidget.h>
 #include <djv/UI/ViewportBinding.h>
 
 #include <djv/Models/AnnotationsModel.h>
@@ -296,6 +297,11 @@ namespace djv
             bool presentView = false;
             bool presentFill = false;
             bool presentDirty = false;
+            //! The waveform over the picture in the present view, and where
+            //! the pointer was, which puts it in the corner furthest away.
+            bool waveformOverlay = false;
+            std::shared_ptr<ScopesWidget> waveformOverlayWidget;
+            ftk::V2I pointerPos;
             bool presentFrameViewPrev = true;
             std::pair<ftk::V2I, double> presentViewPrev;
             std::shared_ptr<ftk::Observer<std::pair<ftk::V2I, double> > > presentObserver;
@@ -726,6 +732,10 @@ namespace djv
 
         void Viewport::setPlayer(const std::shared_ptr<tl::Player>& player)
         {
+            if (_p->waveformOverlayWidget)
+            {
+                _p->waveformOverlayWidget->setPlayer(player);
+            }
             tl::ui::Viewport::setPlayer(player);
             FTK_P();
             if (player)
@@ -944,6 +954,7 @@ namespace djv
                         _p->presentDirty = true;
                     });
                 _presentShow();
+                _waveformOverlayUpdate();
             }
             else
             {
@@ -952,6 +963,60 @@ namespace djv
                 setZoomRange(ftk::RangeD(.01, 512.0));
                 setViewPosAndZoom(p.presentViewPrev.first, p.presentViewPrev.second);
                 setFrameView(p.presentFrameViewPrev);
+                _waveformOverlayUpdate();
+            }
+        }
+
+        bool Viewport::hasWaveformOverlay() const
+        {
+            return _p->waveformOverlay;
+        }
+
+        void Viewport::setWaveformOverlay(bool value)
+        {
+            FTK_P();
+            p.waveformOverlay = value;
+            if (value && !p.waveformOverlayWidget)
+            {
+                if (auto context = getContext())
+                {
+                    p.waveformOverlayWidget = ScopesWidget::create(
+                        context,
+                        p.colorModel.lock(),
+                        shared_from_this());
+                    p.waveformOverlayWidget->setOverlay(true);
+                    p.waveformOverlayWidget->setPlayer(getPlayer());
+                }
+            }
+            _waveformOverlayUpdate();
+        }
+
+        void Viewport::_waveformOverlayUpdate()
+        {
+            FTK_P();
+            if (!p.waveformOverlayWidget)
+                return;
+            const bool visible = p.waveformOverlay && p.presentView;
+            p.waveformOverlayWidget->setVisible(visible);
+            if (!visible)
+                return;
+            // A sixth of the screen each way, so of its proportions, in the
+            // corner furthest from the pointer, clear of the edge.
+            const ftk::Box2I& g = getGeometry();
+            const int w = g.w() / 6;
+            const int h = g.h() / 6;
+            const int margin = std::max(8, g.h() / 60);
+            const bool right = p.pointerPos.x < g.min.x + g.w() / 2;
+            const bool bottom = p.pointerPos.y < g.min.y + g.h() / 2;
+            const ftk::Box2I box(
+                right ? g.max.x - margin - w + 1 : g.min.x + margin,
+                bottom ? g.max.y - margin - h + 1 : g.min.y + margin,
+                w,
+                h);
+            if (box != p.waveformOverlayWidget->getGeometry())
+            {
+                p.waveformOverlayWidget->setGeometry(box);
+                setDrawUpdate();
             }
         }
 
@@ -1057,6 +1122,7 @@ namespace djv
             FTK_P();
             // The screen it is held to may have changed.
             p.presentDirty = p.presentView;
+            _waveformOverlayUpdate();
             p.hudLayout->setGeometry(value);
             if (p.probing)
             {
@@ -1068,6 +1134,11 @@ namespace djv
         {
             tl::ui::Viewport::mouseMoveEvent(event);
             FTK_P();
+            p.pointerPos = event.pos;
+            if (p.waveformOverlay && p.presentView)
+            {
+                _waveformOverlayUpdate();
+            }
             switch (p.mouse.mode)
             {
             case Private::MouseMode::Draw:

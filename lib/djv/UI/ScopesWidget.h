@@ -82,6 +82,10 @@ namespace djv
             //! are collapsed to their titles; a click on a title toggles it.
             DJV_UI_API void setCollapsed(const std::array<bool, 3>&);
 
+            //! Set whether the widget is an overlay: the waveform alone,
+            //! filling it, at half opacity, taking no input.
+            DJV_UI_API void setOverlay(bool);
+
             //! Set the callback for when a scope is collapsed or opened.
             DJV_UI_API void setCollapsedCallback(const std::function<void(const std::array<bool, 3>&)>&);
 

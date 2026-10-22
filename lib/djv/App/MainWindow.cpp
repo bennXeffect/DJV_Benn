@@ -3,6 +3,8 @@
 
 #include <djv/App/MainWindow.h>
 
+#include <djv/App/WindowTransitions.h>
+
 #include <djv/App/ExportTool.h>
 
 #include <djv/App/App.h>
@@ -833,6 +835,9 @@ namespace djv
                             }
                         });
                 }
+                // Straight in and out of full screen, without Windows
+                // growing the window back from the corner of the screen.
+                disableWindowTransitions();
                 setFullScreen(value);
                 _windowUpdate();
                 p.viewport->setPresentView(value);

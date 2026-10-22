@@ -284,6 +284,18 @@ namespace djv
                     }
                 });
 
+            _addCheckCommand(
+                "WaveformOverlay",
+                "Toggle the waveform over the picture in presentation mode.",
+                [mainWindowWeak](const nlohmann::json& args)
+                {
+                    const bool value = args.at("value").get<bool>();
+                    if (auto mainWindow = mainWindowWeak.lock())
+                    {
+                        mainWindow->getViewport()->setWaveformOverlay(value);
+                    }
+                });
+
             const models::AspectRatioOptions aspectRatioOptions;
             for (size_t i = 1; i < aspectRatioOptions.options.size(); ++i)
             {
@@ -369,6 +381,9 @@ namespace djv
             _actions["HUD"] = ftk::Action::create(
                 "HUD / Information Display",
                 _checkCommand("HUD"));
+            _actions["WaveformOverlay"] = ftk::Action::create(
+                "Waveform Overlay (Presentation Mode)",
+                _checkCommand("WaveformOverlay"));
 
             // Register the shortcuts.
             _addShortcut("Frame", ftk::Key::Backspace);
@@ -389,6 +404,11 @@ namespace djv
             _addShortcut("CenterMarker");
             _addShortcut("ClippingWarning");
             _addShortcut("HUD", ftk::KeyShortcut(ftk::Key::H, static_cast<int>(ftk::KeyModifier::Control)));
+            _addShortcut(
+                "WaveformOverlay",
+                ftk::KeyShortcut(
+                    ftk::Key::Z,
+                    static_cast<int>(ftk::KeyModifier::Shift) | static_cast<int>(ftk::KeyModifier::Alt)));
 
             _shortcutsUpdate(app->getSettingsModel()->getShortcuts());
 
