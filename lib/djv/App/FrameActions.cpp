@@ -186,15 +186,15 @@ namespace djv
 
             // Register the shortcuts.
             // To the ends by Shift+Left and Right, as in Blender; Home
-            // fits the picture to the view (see ViewActions). Ten frames by
-            // Down and Up: Alt on the arrows goes from marker to marker.
+            // fits the picture to the view (see ViewActions). The ten frame
+            // steps had Shift, and have no key now.
             _addShortcut("Start", "Start", ftk::KeyShortcut(ftk::Key::Left, static_cast<int>(ftk::KeyModifier::Shift)));
             _addShortcut("End", "End", ftk::KeyShortcut(ftk::Key::Right, static_cast<int>(ftk::KeyModifier::Shift)));
             _addShortcut("Prev", "Previous", ftk::Key::Left);
-            _addShortcut("PrevX10", "Previous X10", ftk::Key::Down);
+            _addShortcut("PrevX10", "Previous X10");
             _addShortcut("PrevX100", "Previous X100", ftk::KeyShortcut(ftk::Key::Left, static_cast<int>(ftk::KeyModifier::Control)));
             _addShortcut("Next", "Next", ftk::Key::Right);
-            _addShortcut("NextX10", "Next X10", ftk::Key::Up);
+            _addShortcut("NextX10", "Next X10");
             _addShortcut("NextX100", "Next X100", ftk::KeyShortcut(ftk::Key::Right, static_cast<int>(ftk::KeyModifier::Control)));
             _addShortcut("FocusCurrent", "Focus Current", ftk::KeyShortcut(ftk::Key::F, static_cast<int>(ftk::KeyModifier::Control)));
 
