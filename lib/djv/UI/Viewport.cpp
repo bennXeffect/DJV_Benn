@@ -302,6 +302,12 @@ namespace djv
             bool waveformOverlay = false;
             std::shared_ptr<ScopesWidget> waveformOverlayWidget;
             ftk::V2I pointerPos;
+            //! The side of the screen the overlays -- the waveform and the
+            //! probe's report -- are on, away from the pointer: chosen as it
+            //! moves, and at the start of a drag, kept until it ends.
+            bool overlaysRight = false;
+            std::shared_ptr<ftk::Spacer> probeSpacerLeft;
+            std::shared_ptr<ftk::Spacer> probeSpacerRight;
             bool presentFrameViewPrev = true;
             std::pair<ftk::V2I, double> presentViewPrev;
             std::shared_ptr<ftk::Observer<std::pair<ftk::V2I, double> > > presentObserver;
@@ -453,15 +459,19 @@ namespace djv
             p.probeLabel->setFont(ftk::FontType::Mono);
             p.probeLabel->setMarginRole(ftk::SizeRole::MarginSmall);
             auto probeRow = ftk::HorizontalLayout::create(context, bottomLayout);
+            p.probeSpacerLeft = ftk::Spacer::create(
+                context, ftk::Orientation::Horizontal, probeRow);
+            p.probeSpacerLeft->setStretch(ftk::Stretch::Expanding);
+            p.probeSpacerLeft->setVisible(false);
             p.probeLayout = ftk::HorizontalLayout::create(context, probeRow);
             p.probeLayout->setSpacingRole(ftk::SizeRole::SpacingSmall);
             p.probeLayout->setMarginRole(ftk::SizeRole::MarginInside);
             p.probeLayout->setBackgroundRole(ftk::ColorRole::Overlay);
             p.probeSwatch->setParent(p.probeLayout);
             p.probeLabel->setParent(p.probeLayout);
-            spacer = ftk::Spacer::create(
+            p.probeSpacerRight = ftk::Spacer::create(
                 context, ftk::Orientation::Horizontal, probeRow);
-            spacer->setStretch(ftk::Stretch::Expanding);
+            p.probeSpacerRight->setStretch(ftk::Stretch::Expanding);
             p.probeLayout->setVisible(false);
 
             p.loupe = PixelLoupe::create(
@@ -991,6 +1001,19 @@ namespace djv
             _waveformOverlayUpdate();
         }
 
+        void Viewport::_overlaysSideUpdate(const ftk::V2I& pos)
+        {
+            FTK_P();
+            const ftk::Box2I& g = getGeometry();
+            const bool right = pos.x < g.min.x + g.w() / 2;
+            if (right == p.overlaysRight)
+                return;
+            p.overlaysRight = right;
+            p.probeSpacerLeft->setVisible(right);
+            p.probeSpacerRight->setVisible(!right);
+            _waveformOverlayUpdate();
+        }
+
         void Viewport::_waveformOverlayUpdate()
         {
             FTK_P();
@@ -1000,17 +1023,22 @@ namespace djv
             p.waveformOverlayWidget->setVisible(visible);
             if (!visible)
                 return;
-            // A sixth of the screen each way, so of its proportions, in the
-            // corner furthest from the pointer, clear of the edge.
+            // A quarter of the screen each way, so of its proportions, at
+            // the bottom on the side away from the pointer, above where the
+            // probe's report shows, clear of the edge.
             const ftk::Box2I& g = getGeometry();
-            const int w = g.w() / 6;
-            const int h = g.h() / 6;
+            const int w = g.w() / 4;
+            const int h = g.h() / 4;
             const int margin = std::max(8, g.h() / 60);
-            const bool right = p.pointerPos.x < g.min.x + g.w() / 2;
-            const bool bottom = p.pointerPos.y < g.min.y + g.h() / 2;
+            // The report is two lines; before it has been shown its label
+            // is empty, one line high.
+            const int probeH = std::max(
+                p.probeLayout->getSizeHint().h,
+                p.probeLabel->getSizeHint().h * 2);
+            const int bottom = g.max.y - margin - probeH - margin;
             const ftk::Box2I box(
-                right ? g.max.x - margin - w + 1 : g.min.x + margin,
-                bottom ? g.max.y - margin - h + 1 : g.min.y + margin,
+                p.overlaysRight ? g.max.x - margin - w + 1 : g.min.x + margin,
+                bottom - h + 1,
                 w,
                 h);
             if (box != p.waveformOverlayWidget->getGeometry())
@@ -1135,9 +1163,10 @@ namespace djv
             tl::ui::Viewport::mouseMoveEvent(event);
             FTK_P();
             p.pointerPos = event.pos;
-            if (p.waveformOverlay && p.presentView)
+            // Kept as it was at the start of a drag.
+            if (ftk::MouseButton::None == event.button)
             {
-                _waveformOverlayUpdate();
+                _overlaysSideUpdate(event.pos);
             }
             switch (p.mouse.mode)
             {
@@ -1193,6 +1222,8 @@ namespace djv
         {
             tl::ui::Viewport::mousePressEvent(event);
             FTK_P();
+            // Where the overlays go for the drag that starts here.
+            _overlaysSideUpdate(event.pos);
             // Shuttling is ours rather than the base class's, so it needs
             // this test of its own; without it it would go on working in a
             // view that takes no input.

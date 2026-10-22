@@ -107,9 +107,9 @@ namespace djv
             //! present view.
             DJV_UI_API bool hasWaveformOverlay() const;
 
-            //! Show the waveform over the picture in the present view, in
-            //! the corner furthest from the pointer, a sixth of the screen
-            //! each way, at half opacity.
+            //! Show the waveform over the picture in the present view, at
+            //! the bottom on the side away from the pointer, a quarter of the
+            //! screen each way, at half opacity.
             DJV_UI_API void setWaveformOverlay(bool);
 
             //! Set whether the heads up display is shown at all. Separate from
@@ -178,6 +178,7 @@ namespace djv
             void _probeMove(const ftk::V2F&);
             void _presentViewUpdate();
             void _waveformOverlayUpdate();
+            void _overlaysSideUpdate(const ftk::V2I&);
             void _presentShow();
             void _presentCenter(double zoom);
             double _presentFit() const;
