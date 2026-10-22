@@ -34,16 +34,6 @@ namespace djv
                 {
                     if (auto app = appWeak.lock())
                     {
-                        // In presentation mode Home is the view's, as in
-                        // Blender: fitted again, or a small picture filled
-                        // or at its own pixels.
-                        if (auto mainWindow = app->getMainWindow())
-                        {
-                            if (mainWindow->getViewport()->presentHome())
-                            {
-                                return;
-                            }
-                        }
                         if (auto player = app->observePlayer()->get())
                         {
                             player->gotoStart();
@@ -195,13 +185,16 @@ namespace djv
                 _command("FocusCurrent"));
 
             // Register the shortcuts.
-            _addShortcut("Start", "Start", ftk::Key::Home);
-            _addShortcut("End", "End", ftk::Key::End);
+            // To the ends by Shift+Left and Right, as in Blender; Home
+            // fits the picture to the view (see ViewActions). Ten frames by
+            // Down and Up: Alt on the arrows goes from marker to marker.
+            _addShortcut("Start", "Start", ftk::KeyShortcut(ftk::Key::Left, static_cast<int>(ftk::KeyModifier::Shift)));
+            _addShortcut("End", "End", ftk::KeyShortcut(ftk::Key::Right, static_cast<int>(ftk::KeyModifier::Shift)));
             _addShortcut("Prev", "Previous", ftk::Key::Left);
-            _addShortcut("PrevX10", "Previous X10", ftk::KeyShortcut(ftk::Key::Left, static_cast<int>(ftk::KeyModifier::Shift)));
+            _addShortcut("PrevX10", "Previous X10", ftk::Key::Down);
             _addShortcut("PrevX100", "Previous X100", ftk::KeyShortcut(ftk::Key::Left, static_cast<int>(ftk::KeyModifier::Control)));
             _addShortcut("Next", "Next", ftk::Key::Right);
-            _addShortcut("NextX10", "Next X10", ftk::KeyShortcut(ftk::Key::Right, static_cast<int>(ftk::KeyModifier::Shift)));
+            _addShortcut("NextX10", "Next X10", ftk::Key::Up);
             _addShortcut("NextX100", "Next X100", ftk::KeyShortcut(ftk::Key::Right, static_cast<int>(ftk::KeyModifier::Control)));
             _addShortcut("FocusCurrent", "Focus Current", ftk::KeyShortcut(ftk::Key::F, static_cast<int>(ftk::KeyModifier::Control)));
 

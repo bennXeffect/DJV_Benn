@@ -27,6 +27,7 @@ namespace djv
             FTK_P();
 
             auto actions = viewActions->getActions();
+            addAction(actions["Fit"]);
             addAction(actions["Frame"]);
             addAction(actions["ZoomReset"]);
             addAction(actions["ZoomIn"]);
@@ -55,6 +56,7 @@ namespace djv
             addAction(actions["CenterMarker"]);
             addAction(actions["ClippingWarning"]);
             addAction(actions["HUD"]);
+            addAction(actions["WaveformOverlay"]);
         }
 
         ViewMenu::ViewMenu() :

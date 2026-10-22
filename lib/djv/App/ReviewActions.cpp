@@ -380,8 +380,8 @@ namespace djv
             _addShortcut("ClearDrawing", "Clear drawing");
             _addShortcut("AddNote", "Add a marker");
             _addShortcut("AddRange", "Add a range");
-            // Shift and Control on the arrows are already taken by the X10 and
-            // X100 frame steps.
+            // Shift and Control on the arrows are already taken by the first
+            // and last frames and the X100 frame steps.
             _addShortcut(
                 "PrevFrame",
                 "Previous marker",

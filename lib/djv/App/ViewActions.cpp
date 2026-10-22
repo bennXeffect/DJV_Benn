@@ -52,6 +52,23 @@ namespace djv
                 });
 
             _addCommand(
+                "Fit",
+                "Fit the image to the view, as Blender's View All; in "
+                "presentation mode, fill the screen or show the image at its "
+                "own pixels, by turns.",
+                [mainWindowWeak](const nlohmann::json&)
+                {
+                    if (auto mainWindow = mainWindowWeak.lock())
+                    {
+                        const auto& viewport = mainWindow->getViewport();
+                        if (!viewport->presentHome())
+                        {
+                            viewport->setFrameView(true);
+                        }
+                    }
+                });
+
+            _addCommand(
                 "ZoomReset",
                 "Reset the view zoom to 1:1.",
                 [mainWindowWeak](const nlohmann::json&)
@@ -327,6 +344,10 @@ namespace djv
                 "Frame",
                 "ViewFrame",
                 _checkCommand("Frame"));
+            _actions["Fit"] = ftk::Action::create(
+                "Fit",
+                "ViewFrame",
+                _command("Fit"));
             _actions["ZoomReset"] = ftk::Action::create(
                 "Zoom Reset",
                 "ViewZoomReset",
@@ -387,6 +408,7 @@ namespace djv
 
             // Register the shortcuts.
             _addShortcut("Frame", ftk::Key::Backspace);
+            _addShortcut("Fit", ftk::Key::Home);
             _addShortcut("ZoomReset", ftk::Key::_0);
             _addShortcut("ZoomIn", ftk::Key::Equals);
             _addShortcut("ZoomOut", ftk::Key::Minus);
@@ -479,6 +501,7 @@ namespace djv
                     // something that is not there.
                     const bool video =
                         value && !value->getIOInfo().video.empty();
+                    _actions["Fit"]->setEnabled(video);
                     _actions["Frame"]->setEnabled(video);
                     _actions["ZoomReset"]->setEnabled(video);
                     _actions["ZoomIn"]->setEnabled(video);
