@@ -7,10 +7,34 @@
 #include <djv/App/MainWindow.h>
 #include <djv/UI/Viewport.h>
 
+#include <algorithm>
+#include <cmath>
+
 namespace djv
 {
     namespace app
     {
+        namespace
+        {
+            //! A second of frames at the playback speed, back or forward,
+            //! kept in the in/out range.
+            void stepSecond(const std::shared_ptr<tl::Player>& player, int direction)
+            {
+                const OTIO_NS::TimeRange& range = player->getInOutRange();
+                const double rate = range.duration().rate();
+                const double frames = std::max(1.0, std::round(player->getSpeed()));
+                if (rate <= 0.0)
+                    return;
+                const OTIO_NS::RationalTime t =
+                    player->getCurrentTime().rescaled_to(rate) +
+                    OTIO_NS::RationalTime(direction * frames, rate);
+                player->seek(std::clamp(
+                    t,
+                    range.start_time(),
+                    range.end_time_inclusive()));
+            }
+        }
+
         struct FrameActions::Private
         {
 
@@ -85,14 +109,14 @@ namespace djv
 
             _addCommand(
                 "PrevX100",
-                "Go to the previous frame X100.",
+                "Go back a second.",
                 [appWeak](const nlohmann::json&)
                 {
                     if (auto app = appWeak.lock())
                     {
                         if (auto player = app->observePlayer()->get())
                         {
-                            player->timeAction(tl::TimeAction::FramePrevX100);
+                            stepSecond(player, -1);
                         }
                     }
                 });
@@ -127,14 +151,14 @@ namespace djv
 
             _addCommand(
                 "NextX100",
-                "Go to the next frame X100.",
+                "Go forward a second.",
                 [appWeak](const nlohmann::json&)
                 {
                     if (auto app = appWeak.lock())
                     {
                         if (auto player = app->observePlayer()->get())
                         {
-                            player->timeAction(tl::TimeAction::FrameNextX100);
+                            stepSecond(player, 1);
                         }
                     }
                 });
@@ -168,7 +192,7 @@ namespace djv
                 "Previous Frame X10",
                 _command("PrevX10"));
             _actions["PrevX100"] = ftk::Action::create(
-                "Previous Frame X100",
+                "Back a Second",
                 _command("PrevX100"));
             _actions["Next"] = ftk::Action::create(
                 "Next Frame",
@@ -178,7 +202,7 @@ namespace djv
                 "Next Frame X10",
                 _command("NextX10"));
             _actions["NextX100"] = ftk::Action::create(
-                "Next Frame X100",
+                "Forward a Second",
                 _command("NextX100"));
             _actions["FocusCurrent"] = ftk::Action::create(
                 "Focus Current Frame",
@@ -186,16 +210,16 @@ namespace djv
 
             // Register the shortcuts.
             // To the ends by Shift+Left and Right, as in Blender; Home
-            // fits the picture to the view (see ViewActions). The ten frame
-            // steps had Shift, and have no key now.
+            // fits the picture to the view (see ViewActions). Ten frames by
+            // Alt, a second by Control.
             _addShortcut("Start", "Start", ftk::KeyShortcut(ftk::Key::Left, static_cast<int>(ftk::KeyModifier::Shift)));
             _addShortcut("End", "End", ftk::KeyShortcut(ftk::Key::Right, static_cast<int>(ftk::KeyModifier::Shift)));
             _addShortcut("Prev", "Previous", ftk::Key::Left);
-            _addShortcut("PrevX10", "Previous X10");
-            _addShortcut("PrevX100", "Previous X100", ftk::KeyShortcut(ftk::Key::Left, static_cast<int>(ftk::KeyModifier::Control)));
+            _addShortcut("PrevX10", "Previous X10", ftk::KeyShortcut(ftk::Key::Left, static_cast<int>(ftk::KeyModifier::Alt)));
+            _addShortcut("PrevX100", "Back a second", ftk::KeyShortcut(ftk::Key::Left, static_cast<int>(ftk::KeyModifier::Control)));
             _addShortcut("Next", "Next", ftk::Key::Right);
-            _addShortcut("NextX10", "Next X10");
-            _addShortcut("NextX100", "Next X100", ftk::KeyShortcut(ftk::Key::Right, static_cast<int>(ftk::KeyModifier::Control)));
+            _addShortcut("NextX10", "Next X10", ftk::KeyShortcut(ftk::Key::Right, static_cast<int>(ftk::KeyModifier::Alt)));
+            _addShortcut("NextX100", "Forward a second", ftk::KeyShortcut(ftk::Key::Right, static_cast<int>(ftk::KeyModifier::Control)));
             _addShortcut("FocusCurrent", "Focus Current", ftk::KeyShortcut(ftk::Key::F, static_cast<int>(ftk::KeyModifier::Control)));
 
             _shortcutsUpdate(app->getSettingsModel()->getShortcuts());

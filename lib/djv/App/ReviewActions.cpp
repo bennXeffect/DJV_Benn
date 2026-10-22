@@ -380,20 +380,10 @@ namespace djv
             _addShortcut("ClearDrawing", "Clear drawing");
             _addShortcut("AddNote", "Add a marker");
             _addShortcut("AddRange", "Add a range");
-            // Shift and Control on the arrows are already taken by the first
-            // and last frames and the X100 frame steps.
-            _addShortcut(
-                "PrevFrame",
-                "Previous marker",
-                ftk::KeyShortcut(
-                    ftk::Key::Left,
-                    static_cast<int>(ftk::KeyModifier::Alt)));
-            _addShortcut(
-                "NextFrame",
-                "Next marker",
-                ftk::KeyShortcut(
-                    ftk::Key::Right,
-                    static_cast<int>(ftk::KeyModifier::Alt)));
+            // No keys: Shift, Control and Alt on the arrows go to the ends,
+            // by seconds and by ten frames.
+            _addShortcut("PrevFrame", "Previous marker");
+            _addShortcut("NextFrame", "Next marker");
 
             _shortcutsUpdate(app->getSettingsModel()->getShortcuts());
 
