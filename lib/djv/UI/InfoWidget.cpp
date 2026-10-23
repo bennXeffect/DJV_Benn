@@ -2,6 +2,7 @@
 // Copyright Contributors to the DJV project.
 
 #include <djv/UI/InfoWidget.h>
+
 #include <djv/Models/SettingsKeys.h>
 
 #include <tlRender/Timeline/Player.h>
@@ -17,6 +18,8 @@
 #include <ftk/Core/Format.h>
 #include <ftk/Core/Path.h>
 #include <ftk/Core/String.h>
+
+#include <chrono>
 
 namespace djv
 {
@@ -41,6 +44,14 @@ namespace djv
 
             std::shared_ptr<ftk::Observer<std::string> > mediaReferenceKeyObserver;
             std::shared_ptr<ftk::Observer<int> > videoLayerObserver;
+
+            //! The metadata of the frame shown: some of it is the frame's
+            //! own, as Blender's render time. Taken at most four times a
+            //! second while it plays.
+            ftk::ImageTags frameTags;
+            std::chrono::steady_clock::time_point frameTagsTime;
+            std::shared_ptr<ftk::ListObserver<tl::VideoFrame> > videoObserver;
+            std::shared_ptr<ftk::Observer<tl::Playback> > playbackObserver;
         };
 
         void InfoWidget::_init(
@@ -178,6 +189,9 @@ namespace djv
             p.path = value ? value->getPath() : ftk::Path();
             p.mediaReferenceKeyObserver.reset();
             p.videoLayerObserver.reset();
+            p.videoObserver.reset();
+            p.playbackObserver.reset();
+            p.frameTags.clear();
             if (value)
             {
                 // The information describes the media reference being
@@ -202,6 +216,64 @@ namespace djv
                         FTK_P();
                         p.videoLayer = layer;
                         _widgetUpdate();
+                    });
+
+                p.videoObserver = ftk::ListObserver<tl::VideoFrame>::create(
+                    value->observeCurrentVideo(),
+                    [this](const std::vector<tl::VideoFrame>& frames)
+                    {
+                        FTK_P();
+                        ftk::ImageTags tags;
+                        if (!frames.empty())
+                        {
+                            for (const auto& layer : frames.front().layers)
+                            {
+                                if (layer.image)
+                                {
+                                    tags = layer.image->getTags();
+                                    break;
+                                }
+                            }
+                        }
+                        if (tags == p.frameTags)
+                            return;
+                        const auto now = std::chrono::steady_clock::now();
+                        const bool playing = p.player &&
+                            p.player->getPlayback() != tl::Playback::Stop;
+                        if (playing && now - p.frameTagsTime < std::chrono::milliseconds(250))
+                            return;
+                        p.frameTagsTime = now;
+                        p.frameTags = tags;
+                        _widgetUpdate();
+                    });
+
+                // Stopped, the frame it stopped on, which the four a second
+                // while playing may have passed over.
+                p.playbackObserver = ftk::Observer<tl::Playback>::create(
+                    value->observePlayback(),
+                    [this](tl::Playback playback)
+                    {
+                        FTK_P();
+                        if (tl::Playback::Stop != playback || !p.player)
+                            return;
+                        ftk::ImageTags tags;
+                        const auto& frames = p.player->getCurrentVideo();
+                        if (!frames.empty())
+                        {
+                            for (const auto& layer : frames.front().layers)
+                            {
+                                if (layer.image)
+                                {
+                                    tags = layer.image->getTags();
+                                    break;
+                                }
+                            }
+                        }
+                        if (tags != p.frameTags)
+                        {
+                            p.frameTags = tags;
+                            _widgetUpdate();
+                        }
                     });
             }
             else
@@ -356,7 +428,9 @@ namespace djv
                 { "File", filePairs(p.path) },
                 { "Video", videoPairs(p.info, p.videoLayer) },
                 { "Audio", audioPairs(p.info) },
-                { "Metadata", Pairs(p.info.tags.begin(), p.info.tags.end()) }
+                { "Metadata", !p.frameTags.empty() ?
+                    Pairs(p.frameTags.begin(), p.frameTags.end()) :
+                    Pairs(p.info.tags.begin(), p.info.tags.end()) }
             };
             // The values line up in one column across the sections, so the
             // tool and the copied text read as one document (#37). Metadata
